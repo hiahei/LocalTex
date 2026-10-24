@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#edf2f0">
+  <title>LocalTeX</title>
+  <script>
+    try {
+      document.documentElement.dataset.theme = localStorage.getItem('localtex.theme.v1') || 'light';
+    } catch {
+      document.documentElement.dataset.theme = 'light';
+    }
+  </script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <section id="projectHome" class="project-home" aria-label="本地 LaTeX 项目">
+    <div class="project-home-shell">
+      <header class="project-home-header">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">T<span>X</span></div>
+          <div>
+            <h1>LocalTeX</h1>
+            <p>本地项目与文件</p>
+          </div>
+        </div>
+        <div class="project-home-status">
+          <button class="theme-toggle" id="homeThemeButton" type="button" title="切换到夜间模式" aria-label="切换到夜间模式"><span class="theme-toggle-icon" aria-hidden="true">☾</span></button>
+          <button class="home-share-button" id="homeShareButton" type="button" hidden>协作分享</button>
+          <span class="local-mode-badge" id="localModeBadge"><span aria-hidden="true">●</span><span id="localModeLabel">本机模式</span></span>
+          <span class="status-pill" id="homeCompilerStatus">检测本地编译器…</span>
+        </div>
+      </header>
+
+      <main class="project-home-main">
+        <section class="project-overview" aria-labelledby="projectOverviewTitle">
+          <div class="project-overview-copy">
+            <h2 id="projectOverviewTitle">项目</h2>
+            <p>继续最近的写作，或打开电脑中的 LaTeX 项目。</p>
+          </div>
+          <div class="project-actions" id="hostProjectActions">
+            <button class="button primary" id="openFolderButton" type="button"><span aria-hidden="true">＋</span> 打开项目文件夹</button>
+            <button class="button secondary" id="openTexButton" type="button">打开 .tex 文件</button>
+            <button class="button ghost" id="addPathButton" type="button">输入本地路径</button>
+          </div>
+        </section>
+
+        <section class="project-list-section" aria-labelledby="projectListTitle">
+          <div class="project-list-heading">
+            <div>
+              <h3 id="projectListTitle">最近项目</h3>
+            </div>
+            <div class="project-list-tools">
+              <label class="project-search">
+                <span aria-hidden="true">⌕</span>
+                <input id="projectSearch" type="search" placeholder="搜索项目、路径或主文档" autocomplete="off" aria-label="搜索项目">
+              </label>
+              <span id="projectCount" class="project-count">0 个项目</span>
+            </div>
+          </div>
+          <div id="projectList" class="project-list"></div>
+        </section>
+      </main>
+    </div>
+  </section>
+
+  <div class="app-shell" id="editorApp" hidden>
+    <header class="topbar">
+      <div class="brand-block">
+        <button class="back-projects" id="projectsButton" type="button" aria-label="返回项目列表">←</button>
+        <div class="editor-project-identity">
+          <h1 id="currentProjectName">LocalTeX</h1>
+          <p id="workspacePath">正在连接本地工作区…</p>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <button class="theme-toggle" id="editorThemeButton" type="button" title="切换到夜间模式" aria-label="切换到夜间模式"><span class="theme-toggle-icon" aria-hidden="true">☾</span></button>
+        <button class="collaboration-pill" id="collaborationButton" type="button" title="协作与分享设置">
+          <span class="connection-dot" aria-hidden="true"></span>
+          <span class="collaborator-avatars" id="collaboratorList" aria-hidden="true"></span>
+          <span id="collaborationLabel">仅本机</span>
+        </button>
+        <span class="status-pill" id="compilerStatus">检测编译器…</span>
+        <button class="button primary" id="compileButton" type="button">保存并编译 <kbd>Ctrl S</kbd></button>
+      </div>
+    </header>
+
+    <main class="workspace-layout" id="workspaceLayout">
+      <aside class="sidebar" id="sidebarPane">
+        <div class="pane-heading">
+          <button class="sidebar-title-toggle" id="collapseSidebarButton" type="button" title="收起文件区" aria-label="收起文件区" aria-controls="sidebarPane" aria-expanded="true">
+            <span class="sidebar-title-copy"><span class="eyebrow">PROJECT</span><strong>文件</strong></span>
+            <span class="sidebar-control-chevron" aria-hidden="true"></span>
+          </button>
+          <div class="icon-actions">
+            <button id="newFileButton" type="button" title="新建文件" aria-label="新建文件">＋</button>
+            <button id="uploadButton" type="button" title="上传文件" aria-label="上传文件">↑</button>
+            <button id="refreshButton" type="button" title="刷新文件列表" aria-label="刷新文件列表">↻</button>
+          </div>
+          <input id="uploadInput" type="file" hidden multiple>
+        </div>
+        <nav id="fileTree" class="file-tree" aria-label="项目文件" role="tree"></nav>
+        <div class="sidebar-note">
+          <span class="dot"></span>
+          <span id="sidebarModeLabel">本机项目</span>
+        </div>
+      </aside>
+
+      <div
+        class="panel-resizer"
+        id="sidebarResizer"
+        role="separator"
+        aria-label="调整文件区和编辑区宽度"
+        aria-controls="sidebarPane editorPane"
+        aria-orientation="vertical"
+        tabindex="0"
+        title="拖动调整宽度；双击恢复默认布局"
+      ></div>
+
+      <section class="editor-pane" id="editorPane" aria-label="LaTeX 编辑器">
+        <div class="editor-heading">
+          <div class="editor-heading-left">
+            <button class="sidebar-expand-button" id="expandSidebarButton" type="button" title="展开文件区" aria-label="展开文件区" aria-controls="sidebarPane" aria-expanded="false" hidden><span class="sidebar-control-chevron" aria-hidden="true"></span><span>文件</span></button>
+            <div class="active-file-row">
+              <span class="file-type" id="fileType">—</span>
+              <strong id="activeFile">请选择一个文件</strong>
+              <span id="dirtyIndicator" class="dirty-indicator" hidden>未保存</span>
+            </div>
+          </div>
+          <label class="main-document-control">
+            <span>主文档</span>
+            <select id="mainDocumentSelect" aria-label="选择主文档"></select>
+          </label>
+        </div>
+
+        <div class="editor-surface" id="editorSurface">
+          <div
+            id="editor"
+            class="code-editor"
+            aria-label="文件内容"
+          ></div>
+        </div>
+
+        <div class="editor-statusbar">
+          <div class="editor-status-left">
+            <span id="cursorPosition">Ln 1, Col 1</span>
+            <span class="status-separator" aria-hidden="true"></span>
+            <span id="saveStatus" data-state="idle">等待编辑</span>
+          </div>
+          <div class="editor-view-controls" aria-label="编辑器阅读设置">
+            <button
+              class="view-control source-sync-control"
+              id="sourceToPdfButton"
+              type="button"
+              title="定位光标在 PDF 中的位置（Ctrl+Alt+J）"
+              disabled
+            ><span aria-hidden="true">→</span><span class="view-control-label">定位 PDF</span></button>
+            <span class="status-separator" aria-hidden="true"></span>
+            <button
+              class="view-control wrap-control"
+              id="wrapButton"
+              type="button"
+              aria-pressed="false"
+              title="切换自动换行（Alt+Z）"
+            ><span aria-hidden="true">↵</span><span class="view-control-label">自动换行</span></button>
+            <span class="status-separator" aria-hidden="true"></span>
+            <div class="font-size-control" role="group" aria-label="编辑器字号">
+              <button class="view-control" id="fontDecreaseButton" type="button" aria-label="减小编辑器字号" title="减小字号">A−</button>
+              <output id="fontSizeLabel" aria-live="polite">14 px</output>
+              <button class="view-control" id="fontIncreaseButton" type="button" aria-label="增大编辑器字号" title="增大字号">A＋</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div
+        class="panel-resizer"
+        id="previewResizer"
+        role="separator"
+        aria-label="调整编辑区和预览区宽度"
+        aria-controls="editorPane previewPane"
+        aria-orientation="vertical"
+        tabindex="0"
+        title="拖动调整宽度；双击恢复默认布局"
+      ></div>
+
+      <section class="preview-pane" id="previewPane" aria-label="编译预览">
+        <div class="preview-heading">
+          <div class="tabs" role="tablist" aria-label="预览选项">
+            <button class="tab active" id="pdfTab" type="button" role="tab" aria-selected="true" title="双击恢复铺满预览">PDF 预览</button>
+            <button class="tab" id="logTab" type="button" role="tab" aria-selected="false">编译日志</button>
+          </div>
+          <div class="preview-heading-meta">
+            <span class="pdf-sync-hint">Ctrl+单击 PDF → 源码</span>
+            <span id="compileTime" class="compile-time">尚未编译</span>
+          </div>
+        </div>
+
+        <div id="pdfPanel" class="preview-content" role="tabpanel">
+          <div id="previewEmpty" class="empty-state">
+            <div class="paper-illustration" aria-hidden="true">
+              <span></span><span></span><span></span><span></span>
+            </div>
+            <strong>准备好开始写作</strong>
+            <p>选择主文档，按 Ctrl+S 保存并编译。</p>
+          </div>
+          <div id="pdfPreview" class="pdf-preview-scroll" title="Ctrl+单击定位源码；双击恢复铺满预览" role="document" tabindex="0" hidden>
+            <div id="pdfPages" class="pdf-pages"></div>
+            <div id="pdfRenderStatus" class="pdf-render-status" hidden></div>
+          </div>
+        </div>
+
+        <div id="logPanel" class="log-panel" role="tabpanel" hidden>
+          <div id="diagnostics" class="diagnostics"></div>
+          <pre id="compileLog">尚无编译日志。</pre>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="share-dialog-backdrop" id="shareDialog" role="dialog" aria-modal="true" aria-labelledby="shareDialogTitle" hidden>
+    <section class="share-dialog-card">
+      <button class="share-dialog-close" id="shareDialogClose" type="button" aria-label="关闭">×</button>
+      <span class="eyebrow">LAN COLLABORATION</span>
+      <h2 id="shareDialogTitle">主机与协作控制</h2>
+      <p id="shareDialogDescription">主机可以独立控制 LocalTeX 服务与局域网分享。</p>
+
+      <section class="host-service-control" id="serviceControl" aria-label="LocalTeX 服务控制">
+        <div class="service-control-heading">
+          <div>
+            <span class="eyebrow">HOST CONTROLLER</span>
+            <strong>LocalTeX 主机控制器在线</strong>
+          </div>
+          <span class="service-mode-badge" id="serviceRunMode">隐藏运行</span>
+        </div>
+
+        <label class="service-preference" for="workServiceToggle">
+          <input id="workServiceToggle" type="checkbox" checked>
+          <span class="service-preference-switch" aria-hidden="true"><span></span></span>
+          <span>
+            <strong>LocalTeX 工作服务</strong>
+            <small id="serviceModeDescription">已开启：可以读取项目、编辑文件和编译 PDF。</small>
+          </span>
+        </label>
+      </section>
+
+      <div class="share-host-control" id="shareControl">
+        <div class="share-control-state">
+          <span class="share-control-dot" aria-hidden="true"></span>
+          <div>
+            <strong id="shareControlTitle">局域网分享已关闭</strong>
+            <p id="shareControlStatus">只有这台主机可以访问项目。</p>
+          </div>
+        </div>
+        <button class="share-toggle-button" id="shareToggleButton" type="button" aria-pressed="false">
+          <span class="share-toggle-track" aria-hidden="true"><span></span></span>
+          <span id="shareToggleLabel">开启分享</span>
+        </button>
+      </div>
+
+      <div class="share-link-block" id="shareLinkBlock">
+        <label for="shareUrl">安全分享链接</label>
+        <div class="share-link-row">
+          <input id="shareUrl" type="text" readonly>
+          <button class="button primary" id="copyShareButton" type="button">复制链接</button>
+        </div>
+      </div>
+
+      <div class="share-start-guide" id="shareStartGuide" hidden>
+        <strong>当前启动方式不支持动态分享</strong>
+        <p>请停止当前调试服务，再双击 <code>LocalTeX.vbs</code>；它会静默启动隐藏的主机控制器，不会留下常驻 CMD 窗口。</p>
+      </div>
+
+      <label class="collaborator-name-field" for="collaboratorNameInput">
+        <span>我的显示名称</span>
+        <input id="collaboratorNameInput" type="text" maxlength="32" autocomplete="off" placeholder="输入主机显示名称" title="修改后会保存为主机默认显示名称">
+      </label>
+
+      <div class="share-security-note">
+        <span aria-hidden="true">⌂</span>
+        <p>仅分享给可信成员。持有链接者可以查看和编辑项目列表中已登记的项目，但不能打开主机文件选择器、添加本地路径或删除项目条目。</p>
+      </div>
+    </section>
+  </div>
+
+  <div class="service-stopped-screen" id="servicePausedScreen" hidden>
+    <div>
+      <span class="eyebrow">HOST CONTROLLER ONLINE</span>
+      <h2>LocalTeX 工作服务已暂停</h2>
+      <p>项目文件、编译与局域网接口均已锁定，主机控制器仍安全在线。</p>
+      <button class="button primary" id="resumeServiceButton" type="button">恢复工作服务</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/vendor/ace/ace.js"></script>
+  <script src="/vendor/ace/theme-textmate.js"></script>
+  <script src="/vendor/ace/mode-latex.js"></script>
+  <script src="/vendor/collaboration.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

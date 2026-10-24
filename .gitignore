@@ -1,0 +1,87 @@
+# -----------------------------------------------------------------------------
+# LocalTeX private user content
+# -----------------------------------------------------------------------------
+
+# Paper sources, figures, bibliographies, and generated PDFs opened by the user.
+/workspace/
+
+# Runtime state: LAN access token, project paths, display name, timestamps,
+# service PID, and service logs. LocalTeX recreates this directory on startup.
+/data/
+
+# Local environment variables and package-manager credentials.
+.env
+.env.*
+!.env.example
+.npmrc
+
+# Private keys, certificates with private material, and credential exports.
+*.key
+*.pem
+*.p12
+*.pfx
+*.kdbx
+credentials*.json
+secrets*.json
+
+# -----------------------------------------------------------------------------
+# Reproducible dependencies and caches
+# -----------------------------------------------------------------------------
+
+# Restored with `npm ci` from package-lock.json.
+/node_modules/
+/.npm-cache/
+/.pnpm-store/
+
+# MiKTeX download/install artifacts that are not needed for normal execution.
+/tools/system-miktex-uninstall-residue/
+/tools/miktex-portable.exe
+/tools/repository/
+
+# Machine-specific MiKTeX logs and font discovery caches. Installed packages,
+# binaries, configuration, and generated formats remain tracked and runnable.
+/tools/miktex/texmfs/config/fontconfig/config/fonts.conf
+/tools/miktex/texmfs/config/fontconfig/config/localfonts.conf
+/tools/miktex/texmfs/data/miktex/log/
+/tools/miktex/texmfs/data/fontconfig/cache/
+
+# -----------------------------------------------------------------------------
+# Runtime and build output
+# -----------------------------------------------------------------------------
+
+*.log
+*.pid
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*.stackdump
+
+# LaTeX generated files outside the private workspace, such as test fixtures.
+**/.tex-build/
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.lot
+*.nav
+*.out
+*.run.xml
+*.snm
+*.synctex.gz
+*.toc
+
+# Local editor and operating-system metadata.
+.agents/
+.codex/
+.vscode/
+.idea/
+.vs/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.lnk
