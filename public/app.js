@@ -1855,7 +1855,7 @@ function showSourceSyncPosition(line, column = -1) {
   synctexState.editorMarkerTimer = setTimeout(clearSourceSyncMarker, 3200);
 }
 
-async function jumpSourceToPdf() {
+async function jumpSourceToPdf(sourcePosition = null) {
   if (!state.activePath?.toLowerCase().endsWith('.tex')) {
     showToast('请先打开一个 TeX 源文件。', true);
     return;
@@ -1871,7 +1871,9 @@ async function jumpSourceToPdf() {
       if (!compiled) return;
     }
 
-    const cursor = codeEditor.getCursorPosition();
+    const cursor = Number.isInteger(sourcePosition?.row) && Number.isInteger(sourcePosition?.column)
+      ? sourcePosition
+      : codeEditor.getCursorPosition();
     const result = await api('/api/synctex/view', {
       method: 'POST',
       body: JSON.stringify({
@@ -2050,6 +2052,18 @@ codeEditor.session.on('change', () => {
   updateCursorPosition();
 });
 codeEditor.selection.on('changeCursor', updateCursorPosition);
+codeEditor.on('click', (event) => {
+  const domEvent = event.domEvent;
+  if (
+    !(domEvent?.ctrlKey || domEvent?.metaKey)
+    || !state.activeProject
+    || !state.activePath?.toLowerCase().endsWith('.tex')
+  ) return;
+  domEvent.preventDefault();
+  domEvent.stopPropagation();
+  const position = event.getDocumentPosition?.() || codeEditor.getCursorPosition();
+  jumpSourceToPdf(position);
+});
 elements.fontDecreaseButton.addEventListener('click', () => changeEditorFontSize(-1));
 elements.fontIncreaseButton.addEventListener('click', () => changeEditorFontSize(1));
 elements.wrapButton.addEventListener('click', toggleEditorWrap);
@@ -2149,8 +2163,11 @@ elements.collaborationButton.addEventListener('click', () => {
 });
 
 window.addEventListener('keydown', (event) => {
-  if ((event.ctrlKey || event.metaKey) && pdfPreviewState.document) {
-    elements.pdfPreview.classList.add('sync-source-ready');
+  if (event.ctrlKey || event.metaKey) {
+    if (pdfPreviewState.document) elements.pdfPreview.classList.add('sync-source-ready');
+    if (state.activePath?.toLowerCase().endsWith('.tex')) {
+      elements.editorSurface.classList.add('sync-pdf-ready');
+    }
   }
   if (event.key === 'Escape' && !elements.shareDialog.hidden) {
     closeShareDialog();
@@ -2174,9 +2191,13 @@ window.addEventListener('keydown', (event) => {
 window.addEventListener('keyup', (event) => {
   if (event.key === 'Control' || event.key === 'Meta') {
     elements.pdfPreview.classList.remove('sync-source-ready');
+    elements.editorSurface.classList.remove('sync-pdf-ready');
   }
 });
-window.addEventListener('blur', () => elements.pdfPreview.classList.remove('sync-source-ready'));
+window.addEventListener('blur', () => {
+  elements.pdfPreview.classList.remove('sync-source-ready');
+  elements.editorSurface.classList.remove('sync-pdf-ready');
+});
 
 window.addEventListener('beforeunload', (event) => {
   if (!state.dirty) return;
