@@ -797,6 +797,16 @@ function connectCollaborationSocket(session) {
       return;
     }
 
+    if (message.type === 'disk-synced') {
+      const content = session.text.toString();
+      if (codeEditor.getValue() === content) {
+        state.savedContent = content;
+        state.compileStale = true;
+        setDirty(false);
+      }
+      return;
+    }
+
     if (message.type === 'save-error') showToast(message.message || '协作文档保存失败。', true);
   });
 
@@ -1532,6 +1542,35 @@ async function refreshFiles(openInitial = false) {
   }
 }
 
+async function refreshWorkspace() {
+  if (state.dirty) {
+    showToast('当前文件有未保存修改，请保存后再刷新。', true);
+    return;
+  }
+
+  try {
+    const activePath = state.activePath;
+    await refreshFiles();
+    if (!activePath) {
+      showToast('文件列表已刷新。');
+      return;
+    }
+
+    const activeFile = state.files.find((file) => file.path === activePath && file.editable);
+    if (!activeFile) {
+      resetEditorState();
+      await refreshFiles();
+      showToast('当前文件已不在项目中，文件列表已刷新。');
+      return;
+    }
+
+    await openFile(activeFile, true, false);
+    showToast('已从本地磁盘重新载入当前文件。');
+  } catch (error) {
+    showToast(error.message, true);
+  }
+}
+
 async function confirmDiscard() {
   if (!state.dirty) return true;
   return window.confirm('当前文件还有未保存修改。确定放弃这些修改吗？');
@@ -2071,7 +2110,7 @@ elements.homeThemeButton.addEventListener('click', toggleTheme);
 elements.editorThemeButton.addEventListener('click', toggleTheme);
 elements.compileButton.addEventListener('click', compileDocument);
 elements.sourceToPdfButton.addEventListener('click', jumpSourceToPdf);
-elements.refreshButton.addEventListener('click', () => refreshFiles());
+elements.refreshButton.addEventListener('click', refreshWorkspace);
 elements.newFileButton.addEventListener('click', createFile);
 elements.uploadButton.addEventListener('click', () => elements.uploadInput.click());
 elements.uploadInput.addEventListener('change', async () => {

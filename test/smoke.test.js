@@ -19,6 +19,7 @@ LocalTeX First Document
 \end{document}
 `, 'utf8');
 fs.writeFileSync(path.join(testWorkspace, 'collab.tex'), 'Collaborative document\n', 'utf8');
+fs.writeFileSync(path.join(testWorkspace, 'external-sync.tex'), 'Before external edit\n', 'utf8');
 process.env.LOCAL_TEX_DATA_ROOT = path.join(testRoot, 'data');
 process.env.LOCAL_TEX_WORKSPACE = testWorkspace;
 fs.mkdirSync(process.env.LOCAL_TEX_DATA_ROOT, { recursive: true });
@@ -440,6 +441,33 @@ test('merges two concurrent collaborative edits and saves the result', { timeout
     firstDocument.destroy();
     secondDocument.destroy();
     await Promise.all([closeSocket(first), closeSocket(second)]);
+  }
+});
+
+test('pushes external local file edits into an active browser document', { timeout: 10_000 }, async () => {
+  const socket = new WebSocket(
+    `${baseUrl.replace(/^http/, 'ws')}/collaboration?project=localtex-workspace&path=external-sync.tex`,
+  );
+  const document = new Y.Doc();
+
+  try {
+    const syncPromise = waitForMessage(socket, (message) => message.type === 'sync');
+    await once(socket, 'open');
+    const initialSync = await syncPromise;
+    Y.applyUpdate(document, Buffer.from(initialSync.update, 'base64'));
+    assert.equal(document.getText('content').toString(), 'Before external edit\n');
+
+    const updatePromise = waitForMessage(socket, (message) => message.type === 'update', 6_000);
+    const diskSyncedPromise = waitForMessage(socket, (message) => message.type === 'disk-synced', 6_000);
+    fs.writeFileSync(path.join(testWorkspace, 'external-sync.tex'), 'After external edit\n', 'utf8');
+
+    const update = await updatePromise;
+    Y.applyUpdate(document, Buffer.from(update.update, 'base64'));
+    await diskSyncedPromise;
+    assert.equal(document.getText('content').toString(), 'After external edit\n');
+  } finally {
+    document.destroy();
+    await closeSocket(socket);
   }
 });
 

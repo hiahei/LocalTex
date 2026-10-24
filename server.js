@@ -1240,6 +1240,10 @@ async function saveCollaborationDocument(context, content) {
   await fsp.writeFile(context.absolutePath, content, 'utf8');
 }
 
+async function loadCollaborationDocument(context) {
+  return fsp.readFile(context.absolutePath, 'utf8');
+}
+
 async function createAppServer() {
   await loadProjectRegistry();
   await loadLanSettings();
@@ -1249,6 +1253,7 @@ async function createAppServer() {
   const collaboration = attachCollaborationServer(server, {
     authenticate: (request, url) => isWorkServiceActive() && isAuthorizedRequest(request, url),
     resolveDocument: resolveCollaborationDocument,
+    loadDocument: loadCollaborationDocument,
     saveDocument: saveCollaborationDocument,
   });
   collaborationServer = collaboration;
