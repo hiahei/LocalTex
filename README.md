@@ -191,10 +191,12 @@ npm start
 
 ## Portable MiKTeX data
 
-MiKTeX configuration, downloaded packages, generated formats, and package data
-remain under `tools\miktex`. Machine-specific font discovery files and caches
-are excluded from Git. A local `tools\repository` cache may be kept for offline
-repair, but it is not required at runtime and is also excluded from Git.
+MiKTeX downloaded packages and portable startup defaults remain under
+`tools\miktex`. Local `miktex.ini` settings can contain authentication tokens;
+they, generated formats, file indexes, and font caches are excluded from Git.
+MiKTeX creates the required local state when needed. A local `tools\repository`
+cache may be kept for offline repair, but it is not required at runtime and is
+also excluded from Git.
 
 ## 主机控制器与工作服务
 

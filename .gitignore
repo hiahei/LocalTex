@@ -38,8 +38,13 @@ secrets*.json
 /tools/miktex-portable.exe
 /tools/repository/
 
-# Machine-specific MiKTeX logs and font discovery caches. Installed packages,
-# binaries, configuration, and generated formats remain tracked and runnable.
+# Machine-specific MiKTeX settings, authentication tokens, formats, and indexes.
+# Keep installed packages and portable startup defaults; regenerate local state.
+/tools/miktex/texmfs/config/miktex/config/miktex.ini
+/tools/miktex/texmfs/config/miktex/data/
+/tools/miktex/texmfs/data/miktex/data/
+/tools/miktex/texmfs/data/miktex/cache/
+/tools/miktex/texmfs/data/fonts/pk/
 /tools/miktex/texmfs/config/fontconfig/config/fonts.conf
 /tools/miktex/texmfs/config/fontconfig/config/localfonts.conf
 /tools/miktex/texmfs/data/miktex/log/

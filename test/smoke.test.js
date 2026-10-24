@@ -515,7 +515,8 @@ test('serves the editor and local configuration', async () => {
   assert.equal(config.codex.reasoningEffort, '');
   assert.equal(config.codex.sandbox, 'read-only');
   if (config.compiler) {
-    assert.match(config.compilerPath, /Local_Tex[\\/]tools[\\/]miktex/i);
+    const portableRoot = path.resolve(__dirname, '..', 'tools', 'miktex');
+    assert.ok(path.resolve(config.compilerPath).startsWith(`${portableRoot}${path.sep}`));
   }
 });
 
