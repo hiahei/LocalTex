@@ -17,6 +17,21 @@ function readAccessToken() {
   }
 }
 
+function projectIdFromUrl() {
+  try {
+    return new URL(window.location.href).searchParams.get('project') || '';
+  } catch {
+    return '';
+  }
+}
+
+function updateProjectUrl(projectId = '') {
+  const currentUrl = new URL(window.location.href);
+  if (projectId) currentUrl.searchParams.set('project', projectId);
+  else currentUrl.searchParams.delete('project');
+  window.history.replaceState(null, '', `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+}
+
 function loadCollaborator() {
   try {
     const saved = JSON.parse(localStorage.getItem(COLLABORATOR_STORAGE_KEY));
@@ -1258,6 +1273,7 @@ async function openProject(projectId) {
     elements.compilerStatus.className = `status-pill ${config.compiler ? 'ready' : 'missing'}`;
     elements.projectHome.hidden = true;
     elements.editorApp.hidden = false;
+    updateProjectUrl(data.project.id);
     requestAnimationFrame(restorePanelLayout);
     await refreshFiles(true);
     await loadProjects();
@@ -1319,6 +1335,7 @@ async function showProjectHome() {
   if (!await confirmDiscard()) return;
   stopDocumentCollaboration();
   state.activeProject = null;
+  updateProjectUrl();
   document.title = 'LocalTeX';
   elements.editorApp.hidden = true;
   elements.projectHome.hidden = false;
@@ -2014,7 +2031,13 @@ async function initialize() {
     applyNetworkConfig(config);
     elements.homeCompilerStatus.textContent = config.compiler || '未找到 TeX 编译器';
     elements.homeCompilerStatus.className = `status-pill ${config.compiler ? 'ready' : 'missing'}`;
-    if (config.service?.active !== false) await loadProjects();
+    if (config.service?.active !== false) {
+      await loadProjects();
+      const requestedProjectId = projectIdFromUrl();
+      const requestedProject = state.projects.find((project) => project.id === requestedProjectId && project.exists);
+      if (requestedProject) await openProject(requestedProject.id);
+      else if (requestedProjectId) updateProjectUrl();
+    }
   } catch (error) {
     showToast(`无法连接本地服务：${error.message}`, true);
   }

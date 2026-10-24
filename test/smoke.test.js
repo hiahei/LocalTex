@@ -216,6 +216,10 @@ test('serves the editor and local configuration', async () => {
   assert.match(script, /toggleTheme/);
   assert.match(script, /ace\/mode\/latex/);
   assert.match(script, /projectQuery/);
+  assert.match(script, /function projectIdFromUrl/);
+  assert.match(script, /function updateProjectUrl/);
+  assert.match(script, /updateProjectUrl\(data\.project\.id\)/);
+  assert.match(script, /if \(requestedProject\) await openProject\(requestedProject\.id\)/);
   assert.match(script, /pointerdown/);
   assert.match(script, /function collapseAllFolders/);
   assert.match(script, /if \(openInitial\) collapseAllFolders\(\)/);
