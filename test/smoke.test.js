@@ -158,6 +158,7 @@ test('serves the editor and local configuration', async () => {
   assert.match(page, /id="wrapButton"/);
   assert.match(page, /id="fontIncreaseButton"/);
   assert.match(page, /id="sourceToPdfButton"/);
+  assert.match(page, /id="pdfSyncHint"/);
   assert.match(page, /源码 → PDF/);
   assert.equal((page.match(/<kbd>Ctrl\+单击<\/kbd>/g) || []).length, 1);
   assert.match(page, /源码 ⇄ PDF/);
@@ -178,6 +179,12 @@ test('serves the editor and local configuration', async () => {
   assert.doesNotMatch(page, /id="shareButton"/);
   assert.match(page, /\/vendor\/ace\/ace\.js/);
   assert.match(page, /\/vendor\/collaboration\.js/);
+
+  const appResponse = await fetch(`${baseUrl}/app.js`);
+  assert.equal(appResponse.status, 200);
+  const appScript = await appResponse.text();
+  assert.match(appScript, /async function previewPdfFile\(file\)/);
+  assert.match(appScript, /loadPdfPreview\(pdfUrl, '', file\.path\)/);
 
   const aceResponse = await fetch(`${baseUrl}/vendor/ace/ace.js`);
   assert.equal(aceResponse.status, 200);

@@ -1875,8 +1875,12 @@ body.resizing-panels iframe {
 }
 
 .compile-time {
+  max-width: min(28vw, 280px);
+  overflow: hidden;
   color: var(--muted);
   font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .preview-content,

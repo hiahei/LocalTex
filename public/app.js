@@ -92,6 +92,7 @@ const elements = {
   pdfPages: document.querySelector('#pdfPages'),
   pdfPreview: document.querySelector('#pdfPreview'),
   pdfRenderStatus: document.querySelector('#pdfRenderStatus'),
+  pdfSyncHint: document.querySelector('#pdfSyncHint'),
   pdfTab: document.querySelector('#pdfTab'),
   previewEmpty: document.querySelector('#previewEmpty'),
   previewPane: document.querySelector('#previewPane'),
@@ -138,6 +139,7 @@ const state = {
   activeProject: null,
   files: [],
   activePath: null,
+  selectedPath: null,
   savedContent: '',
   dirty: false,
   mainDocument: '',
@@ -163,6 +165,7 @@ const pdfPreviewState = {
   renderTimer: 0,
   source: '',
   mainFile: '',
+  previewPath: '',
   zoom: 1,
 };
 const synctexState = {
@@ -1244,6 +1247,7 @@ function resetEditorState() {
   clearSourceSyncMarker();
   state.files = [];
   state.activePath = null;
+  state.selectedPath = null;
   state.savedContent = '';
   codeEditor.setValue('', -1);
   codeEditor.setReadOnly(true);
@@ -1257,6 +1261,7 @@ function resetEditorState() {
   elements.previewEmpty.hidden = false;
   elements.compileLog.textContent = '尚无编译日志。';
   elements.compileTime.textContent = '尚未编译';
+  elements.compileTime.title = '';
   renderDiagnostics([]);
   setDirty(false);
   updateCursorPosition();
@@ -1489,7 +1494,7 @@ function renderFileTree() {
         disclosure.classList.add('placeholder');
         icon.className = `tree-file-icon ${fileIconKind(file)}`;
         icon.textContent = fileIcon(file);
-        row.setAttribute('aria-selected', String(file.path === state.activePath));
+        row.setAttribute('aria-selected', String(file.path === (state.selectedPath || state.activePath)));
         row.append(disclosure, icon, label);
         row.addEventListener('click', () => openFile(file));
         node.append(row);
@@ -1578,7 +1583,9 @@ async function confirmDiscard() {
 
 async function openFile(file, force = false, revealInTree = true) {
   if (!file.editable) {
-    if (/\.(png|jpe?g|svg|pdf)$/i.test(file.path)) {
+    if (/\.pdf$/i.test(file.path)) {
+      await previewPdfFile(file);
+    } else if (/\.(png|jpe?g|svg)$/i.test(file.path)) {
       const assetUrl = authenticatedResourceUrl('/api/asset', {
         path: file.path,
         project: state.activeProject.id,
@@ -1596,6 +1603,7 @@ async function openFile(file, force = false, revealInTree = true) {
 
   const data = await api(`/api/file?path=${encodeURIComponent(file.path)}`);
   state.activePath = data.path;
+  state.selectedPath = data.path;
   if (revealInTree) expandFileParents(data.path);
   state.savedContent = data.content;
   codeEditor.setValue(data.content, -1);
@@ -1707,6 +1715,7 @@ function clearPdfPreview() {
   pdfPreviewState.loadingTask = null;
   pdfPreviewState.source = '';
   pdfPreviewState.mainFile = '';
+  pdfPreviewState.previewPath = '';
   pdfPreviewState.zoom = 1;
   clearTimeout(synctexState.pdfMarkerTimer);
   elements.pdfPages.replaceChildren();
@@ -1771,7 +1780,29 @@ function queuePdfRender(delay = 100) {
   }, delay);
 }
 
-async function loadPdfPreview(source, mainFile = state.mainDocument) {
+function hasSourceMappedPdf() {
+  return Boolean(
+    pdfPreviewState.document
+    && pdfPreviewState.mainFile
+    && pdfPreviewState.mainFile === state.mainDocument
+  );
+}
+
+function updatePdfPreviewContext() {
+  const sourceMapped = hasSourceMappedPdf();
+  elements.pdfSyncHint.hidden = !sourceMapped;
+  elements.pdfPreview.title = sourceMapped
+    ? 'Ctrl+单击定位源码；双击恢复铺满预览'
+    : '双击恢复铺满预览';
+  elements.pdfPreview.setAttribute(
+    'aria-label',
+    pdfPreviewState.previewPath
+      ? `PDF 预览：${pdfPreviewState.previewPath}`
+      : '编译结果 PDF 预览',
+  );
+}
+
+async function loadPdfPreview(source, mainFile = state.mainDocument, previewPath = '') {
   const generation = pdfPreviewState.renderGeneration + 1;
   pdfPreviewState.renderGeneration = generation;
   pdfPreviewState.loadingTask?.destroy?.();
@@ -1779,7 +1810,9 @@ async function loadPdfPreview(source, mainFile = state.mainDocument) {
   pdfPreviewState.document = null;
   pdfPreviewState.source = source;
   pdfPreviewState.mainFile = mainFile;
+  pdfPreviewState.previewPath = previewPath;
   pdfPreviewState.zoom = 1;
+  updatePdfPreviewContext();
   elements.pdfPages.replaceChildren();
   elements.pdfPreview.hidden = false;
   setPdfRenderStatus('正在加载 PDF…');
@@ -1801,13 +1834,34 @@ async function loadPdfPreview(source, mainFile = state.mainDocument) {
     }
     pdfPreviewState.loadingTask = null;
     pdfPreviewState.document = pdf;
+    updatePdfPreviewContext();
     await renderPdfPages(generation);
     return true;
   } catch (error) {
     if (generation !== pdfPreviewState.renderGeneration) return;
     setPdfRenderStatus(`PDF 预览加载失败：${error.message}`, true);
-    showToast('PDF 已生成，但预览加载失败。', true);
+    showToast('PDF 预览加载失败。', true);
     return false;
+  }
+}
+
+async function previewPdfFile(file) {
+  try {
+    const pdfUrl = authenticatedResourceUrl('/api/asset', {
+      path: file.path,
+      project: state.activeProject.id,
+      t: Date.now(),
+    });
+    state.selectedPath = file.path;
+    renderFileTree();
+    elements.previewEmpty.hidden = true;
+    elements.compileTime.textContent = `预览 · ${file.path}`;
+    elements.compileTime.title = file.path;
+    switchPreview('pdf');
+    const previewLoaded = await loadPdfPreview(pdfUrl, '', file.path);
+    if (previewLoaded) showToast(`正在预览 ${file.path}`);
+  } catch (error) {
+    showToast(error.message, true);
   }
 }
 
@@ -1935,6 +1989,7 @@ async function jumpPdfToSource(event) {
   if (!(event.ctrlKey || event.metaKey)) return;
   const canvas = event.target.closest?.('.pdf-page-canvas');
   if (!canvas) return;
+  if (!hasSourceMappedPdf()) return;
   event.preventDefault();
   event.stopPropagation();
   if (state.compileStale) {
@@ -1984,6 +2039,7 @@ async function compileDocument() {
   state.compileRunning = true;
   setCompileButtonRunning(true);
   elements.compileTime.textContent = '正在保存并编译';
+  elements.compileTime.title = '';
 
   try {
     const saved = await saveFile(true);
@@ -2007,6 +2063,8 @@ async function compileDocument() {
     elements.previewEmpty.hidden = true;
     switchPreview('pdf');
     state.compileStale = false;
+    state.selectedPath = state.activePath;
+    renderFileTree();
     const previewLoaded = await loadPdfPreview(pdfUrl, state.mainDocument);
     if (previewLoaded) showToast(`编译成功 · ${result.compiler}`);
     return previewLoaded;
@@ -2203,7 +2261,7 @@ elements.collaborationButton.addEventListener('click', () => {
 
 window.addEventListener('keydown', (event) => {
   if (event.ctrlKey || event.metaKey) {
-    if (pdfPreviewState.document) elements.pdfPreview.classList.add('sync-source-ready');
+    if (hasSourceMappedPdf()) elements.pdfPreview.classList.add('sync-source-ready');
     if (state.activePath?.toLowerCase().endsWith('.tex')) {
       elements.editorSurface.classList.add('sync-pdf-ready');
     }
