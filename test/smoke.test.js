@@ -158,8 +158,8 @@ test('serves the editor and local configuration', async () => {
   assert.match(page, /id="fontIncreaseButton"/);
   assert.match(page, /id="sourceToPdfButton"/);
   assert.match(page, /源码 → PDF/);
-  assert.equal((page.match(/<kbd>Ctrl\+单击<\/kbd>/g) || []).length, 2);
-  assert.match(page, /PDF → 源码/);
+  assert.equal((page.match(/<kbd>Ctrl\+单击<\/kbd>/g) || []).length, 1);
+  assert.match(page, /源码 ⇄ PDF/);
   assert.match(page, /id="fileTree"[^>]+role="tree"/);
   assert.match(page, /id="sidebarModeLabel"/);
   assert.match(page, /class="project-overview"/);
@@ -259,7 +259,7 @@ test('serves the editor and local configuration', async () => {
   assert.match(styles, /\.code-editor \.ace_comment/);
   assert.match(styles, /\.pdf-sync-marker/);
   assert.match(styles, /#pdfPreview\[hidden\] \+ \.pdf-sync-hint/);
-  assert.match(styles, /\.pdf-sync-hint-item/);
+  assert.match(styles, /min-width: 156px/);
   assert.match(styles, /bottom: 3px/);
   assert.match(styles, /opacity: 0\.86/);
   assert.match(styles, /\.editor-surface\.sync-pdf-ready \.ace_content/);
