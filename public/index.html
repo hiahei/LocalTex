@@ -156,7 +156,7 @@
               type="button"
               title="定位光标在 PDF 中的位置（Ctrl+Alt+J）"
               disabled
-            ><span aria-hidden="true">→</span><span class="view-control-label">定位 PDF</span></button>
+            ><span aria-hidden="true">→</span><span class="view-control-label">源码 → PDF</span></button>
             <span class="status-separator" aria-hidden="true"></span>
             <button
               class="view-control wrap-control"
@@ -193,7 +193,6 @@
             <button class="tab" id="logTab" type="button" role="tab" aria-selected="false">编译日志</button>
           </div>
           <div class="preview-heading-meta">
-            <span class="pdf-sync-hint">Ctrl+单击 PDF → 源码</span>
             <span id="compileTime" class="compile-time">尚未编译</span>
           </div>
         </div>
@@ -209,6 +208,10 @@
           <div id="pdfPreview" class="pdf-preview-scroll" title="Ctrl+单击定位源码；双击恢复铺满预览" role="document" tabindex="0" hidden>
             <div id="pdfPages" class="pdf-pages"></div>
             <div id="pdfRenderStatus" class="pdf-render-status" hidden></div>
+          </div>
+          <div class="pdf-sync-hint" aria-label="PDF 到源码定位提示">
+            <kbd>Ctrl</kbd>
+            <span>单击 PDF 正文，定位源码</span>
           </div>
         </div>
 
