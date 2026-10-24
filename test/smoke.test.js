@@ -217,7 +217,9 @@ test('serves the editor and local configuration', async () => {
   assert.match(script, /ace\/mode\/latex/);
   assert.match(script, /projectQuery/);
   assert.match(script, /pointerdown/);
-  assert.match(script, /loadCollapsedFolders/);
+  assert.match(script, /function collapseAllFolders/);
+  assert.match(script, /if \(openInitial\) collapseAllFolders\(\)/);
+  assert.match(script, /openFile\(initial, true, false\)/);
   assert.match(script, /aria-expanded/);
   assert.match(script, /\/api\/lan/);
   assert.match(script, /\/api\/service\/state/);

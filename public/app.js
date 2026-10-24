@@ -158,7 +158,6 @@ const synctexState = {
 let pdfJsRuntimePromise = null;
 
 const PANEL_LAYOUT_STORAGE_KEY = 'localtex.panel-layout.v1';
-const FILE_TREE_STORAGE_KEY = 'localtex.file-tree.v1';
 const panelLayout = {
   activeDrag: null,
   editorResizeFrame: 0,
@@ -1246,7 +1245,7 @@ async function openProject(projectId) {
       body: JSON.stringify({ id: projectId }),
     });
     state.activeProject = data.project;
-    state.collapsedFolders = loadCollapsedFolders(data.project.id);
+    state.collapsedFolders = new Set();
     state.mainDocument = data.project.mainFile || '';
     resetEditorState();
 
@@ -1339,25 +1338,12 @@ function updateCursorPosition() {
   elements.cursorPosition.textContent = `Ln ${cursor.row + 1}, Col ${cursor.column + 1}`;
 }
 
-function loadCollapsedFolders(projectId) {
-  try {
-    const saved = JSON.parse(localStorage.getItem(`${FILE_TREE_STORAGE_KEY}:${projectId}`));
-    return new Set(Array.isArray(saved) ? saved.filter((value) => typeof value === 'string') : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function saveCollapsedFolders() {
-  if (!state.activeProject) return;
-  try {
-    localStorage.setItem(
-      `${FILE_TREE_STORAGE_KEY}:${state.activeProject.id}`,
-      JSON.stringify([...state.collapsedFolders]),
-    );
-  } catch {
-    // Folder state remains available until this page is closed.
-  }
+function collapseAllFolders() {
+  state.collapsedFolders = new Set(
+    state.files
+      .filter((file) => file.type === 'directory')
+      .map((file) => file.path),
+  );
 }
 
 function parentDirectory(filePath) {
@@ -1389,12 +1375,10 @@ function expandFileParents(filePath) {
   const segments = filePath.split('/');
   segments.pop();
   let current = '';
-  let changed = false;
   for (const segment of segments) {
     current = current ? `${current}/${segment}` : segment;
-    changed = state.collapsedFolders.delete(current) || changed;
+    state.collapsedFolders.delete(current);
   }
-  if (changed) saveCollapsedFolders();
 }
 
 function renderFileTree() {
@@ -1465,7 +1449,6 @@ function renderFileTree() {
         row.addEventListener('click', () => {
           if (expanded) state.collapsedFolders.add(file.path);
           else state.collapsedFolders.delete(file.path);
-          saveCollapsedFolders();
           renderFileTree();
           const nextRow = [...elements.fileTree.querySelectorAll('.tree-row.directory')]
             .find((candidate) => candidate.dataset.path === file.path);
@@ -1521,13 +1504,14 @@ function renderMainDocuments() {
 async function refreshFiles(openInitial = false) {
   const data = await api('/api/files');
   state.files = data.files;
+  if (openInitial) collapseAllFolders();
   renderFileTree();
   renderMainDocuments();
 
   if (openInitial && !state.activePath) {
     const initial = state.files.find((file) => file.path === state.mainDocument)
       || state.files.find((file) => file.editable);
-    if (initial) await openFile(initial, true);
+    if (initial) await openFile(initial, true, false);
   }
 }
 
@@ -1536,7 +1520,7 @@ async function confirmDiscard() {
   return window.confirm('当前文件还有未保存修改。确定放弃这些修改吗？');
 }
 
-async function openFile(file, force = false) {
+async function openFile(file, force = false, revealInTree = true) {
   if (!file.editable) {
     if (/\.(png|jpe?g|svg|pdf)$/i.test(file.path)) {
       const assetUrl = authenticatedResourceUrl('/api/asset', {
@@ -1556,7 +1540,7 @@ async function openFile(file, force = false) {
 
   const data = await api(`/api/file?path=${encodeURIComponent(file.path)}`);
   state.activePath = data.path;
-  expandFileParents(data.path);
+  if (revealInTree) expandFileParents(data.path);
   state.savedContent = data.content;
   codeEditor.setValue(data.content, -1);
   codeEditor.session.getUndoManager().reset();
