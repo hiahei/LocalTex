@@ -158,8 +158,9 @@ test('serves the editor and local configuration', async () => {
   assert.match(page, /id="fontIncreaseButton"/);
   assert.match(page, /id="sourceToPdfButton"/);
   assert.match(page, /源码 → PDF/);
-  assert.match(page, /<kbd>Ctrl<\/kbd>/);
-  assert.match(page, /单击 PDF 正文，定位源码/);
+  assert.match(page, /<kbd>Ctrl\+Alt\+J<\/kbd>/);
+  assert.match(page, /<kbd>Ctrl\+单击<\/kbd>/);
+  assert.match(page, /PDF → 源码/);
   assert.match(page, /id="fileTree"[^>]+role="tree"/);
   assert.match(page, /id="sidebarModeLabel"/);
   assert.match(page, /class="project-overview"/);
@@ -257,6 +258,9 @@ test('serves the editor and local configuration', async () => {
   assert.match(styles, /\.code-editor \.ace_comment/);
   assert.match(styles, /\.pdf-sync-marker/);
   assert.match(styles, /#pdfPreview\[hidden\] \+ \.pdf-sync-hint/);
+  assert.match(styles, /\.pdf-sync-hint-item/);
+  assert.match(styles, /bottom: 3px/);
+  assert.match(styles, /opacity: 0\.72/);
   assert.match(styles, /\.ace_synctex-line/);
   assert.match(styles, /:root\[data-theme="dark"\][\s\S]*--editor: #fcfdfd/);
   assert.match(styles, /html\[data-theme="dark"\] \.code-editor[\s\S]*color: #21312c/);
