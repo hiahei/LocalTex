@@ -9,14 +9,24 @@ const { readFile } = require('node:fs/promises');
 const test = require('node:test');
 const { WebSocket } = require('ws');
 const Y = require('yjs');
+const { createCodexAppServerClient } = require('../codex-app-server');
+const { createCodexService } = require('../codex-service');
 
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'localtex-test-'));
 const testWorkspace = path.join(testRoot, 'workspace');
 fs.mkdirSync(testWorkspace, { recursive: true });
 fs.writeFileSync(path.join(testWorkspace, 'main.tex'), String.raw`\documentclass{article}
 \begin{document}
-LocalTeX First Document
+LocalTeX First Document \cite{localtex2026}
+\bibliographystyle{plain}
+\bibliography{references}
 \end{document}
+`, 'utf8');
+fs.writeFileSync(path.join(testWorkspace, 'references.bib'), String.raw`@article{localtex2026,
+  title = {LocalTeX Clean Build Test},
+  author = {LocalTeX},
+  year = {2026}
+}
 `, 'utf8');
 fs.writeFileSync(path.join(testWorkspace, 'collab.tex'), 'Collaborative document\n', 'utf8');
 fs.writeFileSync(path.join(testWorkspace, 'external-sync.tex'), 'Before external edit\n', 'utf8');
@@ -32,7 +42,7 @@ fs.writeFileSync(path.join(process.env.LOCAL_TEX_DATA_ROOT, 'projects.json'), JS
   lastOpenedAt: null,
 }]), 'utf8');
 
-const { createAppServer } = require('../server');
+const { createAppServer, parseLocalPickerOutput } = require('../server');
 
 let server;
 let baseUrl;
@@ -154,13 +164,28 @@ test('serves the editor and local configuration', async () => {
   assert.doesNotMatch(page, /id="saveButton"/);
   assert.match(page, /id="previewResizer"/);
   assert.match(page, /id="pdfPreview" class="pdf-preview-scroll"/);
+  assert.match(page, /右键拖动平移/);
   assert.doesNotMatch(page, /<iframe id="pdfPreview"/);
   assert.match(page, /id="wrapButton"/);
   assert.match(page, /id="fontIncreaseButton"/);
+  assert.match(page, /id="editorFindbar"/);
+  assert.match(page, /id="editorFindInput"/);
+  assert.match(page, /id="editorFindPrevious"/);
+  assert.match(page, /id="editorFindNext"/);
+  assert.match(page, /<span>编译对象<\/span>/);
+  assert.match(page, /id="mainDocumentSelect" aria-label="选择编译对象"/);
   assert.match(page, /id="sourceToPdfButton"/);
+  assert.match(page, /id="codexReasoningSelect"/);
+  assert.match(page, /<option value="high">High<\/option>/);
+  assert.match(page, /<option value="xhigh">XHigh<\/option>/);
   assert.match(page, /id="pdfSyncHint"/);
+  assert.match(page, /id="pdfPageIndicator"/);
+  assert.match(page, /id="pdfResetZoomButton"/);
+  assert.match(page, /id="pdfDownloadButton"/);
+  assert.match(page, />恢复缩放</);
   assert.match(page, /源码 → PDF/);
-  assert.equal((page.match(/<kbd>Ctrl\+单击<\/kbd>/g) || []).length, 1);
+  assert.equal((page.match(/<kbd>Alt\+单击<\/kbd>/g) || []).length, 1);
+  assert.doesNotMatch(page, /Ctrl\+单击/);
   assert.match(page, /源码 ⇄ PDF/);
   assert.match(page, /id="fileTree"[^>]+role="tree"/);
   assert.match(page, /id="sidebarModeLabel"/);
@@ -169,6 +194,7 @@ test('serves the editor and local configuration', async () => {
   assert.doesNotMatch(page, /class="hero-workbench"/);
   assert.match(page, /id="shareDialog"/);
   assert.match(page, /id="shareToggleButton"/);
+  assert.match(page, /id="copyShareLabel" aria-live="polite"/);
   assert.match(page, /id="workServiceToggle"/);
   assert.match(page, /id="resumeServiceButton"/);
   assert.match(page, /id="servicePausedScreen"/);
@@ -176,15 +202,91 @@ test('serves the editor and local configuration', async () => {
   assert.match(page, /title="修改后会保存为主机默认显示名称"/);
   assert.match(page, /id="homeThemeButton"/);
   assert.match(page, /id="editorThemeButton"/);
+  assert.match(page, /id="codexExpandButton"/);
+  assert.match(page, /id="codexCollapseButton"/);
+  assert.match(page, /id="codexResizer"/);
+  assert.match(page, /id="codexPanel"/);
+  assert.match(page, /id="codexHistoryList"/);
+  assert.match(page, /id="codexHistoryCount"/);
+  assert.match(page, /id="codexHistorySearch"/);
+  assert.match(page, /id="codexHistoryRefreshButton"/);
+  assert.match(page, /id="codexHistoryToggleButton"/);
+  assert.match(page, /id="codexWorkspaceFilter"/);
+  assert.match(page, /id="codexRenameForm"/);
+  assert.match(page, /<strong>询问 Codex<\/strong>/);
+  assert.doesNotMatch(page, /在论文项目中询问 Codex/);
+  assert.ok(page.indexOf('id="codexExpandButton"') > page.indexOf('id="codexPanel"'));
+  assert.doesNotMatch(page, /id="codexLauncher"/);
+  assert.doesNotMatch(page, /id="codexTab"/);
+  assert.match(page, /id="codexPrompt"/);
+  assert.match(page, /id="codexConversationRefreshButton"/);
+  assert.match(page, />刷新对话</);
+  assert.ok(page.indexOf('id="codexConversationRefreshButton"') < page.indexOf('id="codexPrompt"'));
+  assert.match(page, /id="codexModelSelect"/);
+  assert.match(page, /跟随本机配置/);
+  assert.match(page, /id="codexPermissionSelect"/);
+  assert.match(page, /value="workspace-write">项目可写/);
+  assert.match(page, /value="full-access">Full access/);
+  assert.match(page, /本机 Codex 配置/);
   assert.doesNotMatch(page, /id="shareButton"/);
   assert.match(page, /\/vendor\/ace\/ace\.js/);
   assert.match(page, /\/vendor\/collaboration\.js/);
+  assert.match(page, /\/vendor\/katex\/katex\.min\.css/);
+  assert.match(page, /\/vendor\/katex\/katex\.min\.js/);
+  assert.match(page, /\/vendor\/katex\/contrib\/auto-render\.min\.js/);
+  assert.match(page, /\/vendor\/katex\/contrib\/copy-tex\.min\.js/);
 
   const appResponse = await fetch(`${baseUrl}/app.js`);
   assert.equal(appResponse.status, 200);
   const appScript = await appResponse.text();
   assert.match(appScript, /async function previewPdfFile\(file\)/);
   assert.match(appScript, /loadPdfPreview\(pdfUrl, '', file\.path\)/);
+  assert.match(appScript, /async function sendCodexPrompt\(/);
+  assert.match(appScript, /new EventSource\(eventUrl\)/);
+  assert.match(appScript, /function receiveCodexEvent\(/);
+  assert.match(appScript, /function scheduleCodexEventPoll\(/);
+  assert.match(appScript, /async function pollCodexRunEvents\(/);
+  assert.match(appScript, /async function refreshCodexConversation\(/);
+  assert.match(appScript, /elements\.codexConversationRefreshButton\.addEventListener\('click', refreshCodexConversation\)/);
+  assert.match(appScript, /const draft = elements\.codexPrompt\.value/);
+  assert.match(appScript, /elements\.codexPrompt\.value = draft/);
+  assert.match(appScript, /event\.recoverable === 'context-window'/);
+  assert.match(appScript, /elements\.codexPrompt\.value = event\.retryPrompt/);
+  assert.match(appScript, /data\.thread\?\.historyTruncated/);
+  assert.match(appScript, /after=\$\{codexState\.lastEventSequence\}/);
+  assert.match(appScript, /scheduleCodexEventPoll\(runId, 100\)/);
+  assert.match(appScript, /function setCodexCollapsed\(/);
+  assert.match(appScript, /\[elements\.codexResizer, 'codex'\]/);
+  assert.doesNotMatch(appScript, /CODEX_HISTORY_STORAGE_PREFIX|saveCodexHistory/);
+  assert.match(appScript, /\/api\/codex\/threads/);
+  assert.match(appScript, /function renameCodexThread\(/);
+  assert.match(appScript, /function renderCodexHistoryList\(/);
+  assert.match(appScript, /function setCodexHistoryCollapsed\(/);
+  assert.match(appScript, /async function updateCodexPermission\(/);
+  assert.match(appScript, /async function updateCodexModel\(/);
+  assert.match(appScript, /function renderCodexMessageBody\(/);
+  assert.match(appScript, /function appendCodexTurnDivider\(/);
+  assert.match(appScript, /if \(role === 'user'\) appendCodexTurnDivider\(\)/);
+  assert.match(appScript, /function applyCodexFinalAssistant\(/);
+  assert.match(appScript, /applyCodexFinalAssistant\(event\)/);
+  assert.match(appScript, /function upsertCodexFileChange\(/);
+  assert.match(appScript, /event\.type === 'file-change'/);
+  assert.match(appScript, /function refreshProjectAfterCodex\(/);
+  assert.match(appScript, /function showCodexThinking\(/);
+  assert.match(appScript, /function hideCodexThinking\(/);
+  assert.match(appScript, /showCodexThinking\(event\.message \|\| 'Codex 正在运行…'\)/);
+  assert.match(appScript, /elements\.codexRunStatus\.hidden = running/);
+  assert.match(appScript, /elements\.codexPrompt\.disabled = !canUseCodex/);
+  assert.match(appScript, /可以先输入下一条 Prompt，当前回答结束后即可发送/);
+  assert.match(appScript, /if \(codexState\.running\) return;\s*\n\s*event\.preventDefault\(\)/);
+  assert.match(appScript, /window\.renderMathInElement\(body/);
+  assert.match(appScript, /ignoredTags: \['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option'\]/);
+  assert.match(appScript, /\/api\/codex\/models/);
+  assert.match(appScript, /\/api\/codex\/settings/);
+  assert.match(appScript, /function renderCodexReasoningOptions\(/);
+  assert.match(appScript, /function updateCodexReasoningEffort\(/);
+  assert.match(appScript, /parameters\.set\('cwd', codexState\.workspaceFilter\)/);
+  assert.doesNotMatch(appScript, /canContinueActiveCodexThread|这段历史属于其他工作区/);
 
   const aceResponse = await fetch(`${baseUrl}/vendor/ace/ace.js`);
   assert.equal(aceResponse.status, 200);
@@ -206,6 +308,18 @@ test('serves the editor and local configuration', async () => {
   assert.equal(pdfWorkerResponse.status, 200);
   assert.match(await pdfWorkerResponse.text(), /WorkerMessageHandler/);
 
+  const katexRuntimeResponse = await fetch(`${baseUrl}/vendor/katex/katex.min.js`);
+  assert.equal(katexRuntimeResponse.status, 200);
+  assert.match(await katexRuntimeResponse.text(), /renderToString/);
+
+  const katexAutoRenderResponse = await fetch(`${baseUrl}/vendor/katex/contrib/auto-render.min.js`);
+  assert.equal(katexAutoRenderResponse.status, 200);
+  assert.match(await katexAutoRenderResponse.text(), /renderMathInElement/);
+
+  const katexFontResponse = await fetch(`${baseUrl}/vendor/katex/fonts/KaTeX_AMS-Regular.woff2`);
+  assert.equal(katexFontResponse.status, 200);
+  assert.match(katexFontResponse.headers.get('content-type'), /font\/woff2/);
+
   const collaborationRuntimeResponse = await fetch(`${baseUrl}/vendor/collaboration.js`);
   assert.equal(collaborationRuntimeResponse.status, 200);
   assert.match(await collaborationRuntimeResponse.text(), /LocalTeXCollaborationRuntime/);
@@ -225,6 +339,15 @@ test('serves the editor and local configuration', async () => {
   assert.doesNotMatch(script, /ace\/theme\/github_dark/);
   assert.match(script, /toggleTheme/);
   assert.match(script, /ace\/mode\/latex/);
+  assert.match(script, /function openEditorFindbar\(/);
+  assert.match(script, /function closeEditorFindbar\(/);
+  assert.match(script, /function findEditorMatch\(/);
+  assert.match(script, /bindKey: \{ win: 'Ctrl-F', mac: 'Command-F' \}/);
+  assert.match(script, /function isTexFilePath\(/);
+  assert.match(script, /async function setMainDocument\(/);
+  assert.match(script, /openFile\(file, false, true, true\)/);
+  assert.match(script, /if \(selectForCompile && isTexFilePath\(data\.path\)\) await setMainDocument\(data\.path\)/);
+  assert.match(script, /elements\.mainDocumentSelect\.disabled = running/);
   assert.match(script, /projectQuery/);
   assert.match(script, /function projectIdFromUrl/);
   assert.match(script, /function updateProjectUrl/);
@@ -240,16 +363,58 @@ test('serves the editor and local configuration', async () => {
   assert.match(script, /\/api\/profile/);
   assert.match(script, /PDFJS_ASSET_ROOT = '\/vendor\/pdfjs\/'/);
   assert.match(script, /build\/pdf\.mjs/);
+  assert.match(script, /web\/pdf_viewer\.mjs/);
   assert.match(script, /pdf-page-canvas/);
+  assert.match(script, /new pdfjsViewer\.TextLayerBuilder\(\{ pdfPage: page \}\)/);
+  assert.match(script, /function clearPdfTextLayers\(/);
+  assert.match(script, /viewport\.scale \* viewport\.userUnit/);
+  assert.match(script, /const renderScaleX = canvas\.width \/ viewport\.width/);
+  assert.match(script, /const renderScaleY = canvas\.height \/ viewport\.height/);
+  assert.match(script, /pdf-text-layer/);
   assert.match(script, /zoomPdfPreview/);
+  assert.match(script, /function updatePdfPageIndicator\(/);
+  assert.match(script, /function schedulePdfPageIndicatorUpdate\(/);
+  assert.match(script, /`第 \$\{currentPage\} \/ \$\{totalPages\} 页`/);
+  assert.match(script, /function startPdfPan\(/);
+  assert.match(script, /event\.button !== 2/);
+  assert.match(script, /function movePdfPan\(/);
+  assert.match(script, /pdfPreview\.scrollLeft -= deltaX/);
+  assert.match(script, /pdfPreview\.scrollTop -= deltaY/);
+  assert.match(script, /pdfPreview\.addEventListener\('pointerdown', startPdfPan\)/);
+  assert.match(script, /pdfPreview\.addEventListener\('contextmenu'/);
   assert.match(script, /resetPdfPreview/);
+  assert.match(script, /pdfResetZoomButton\.addEventListener\('click', resetPdfPreview\)/);
+  assert.match(script, /function pdfDownloadFileName\(/);
+  assert.match(script, /async function downloadPdfPreview\(/);
+  assert.match(script, /link\.download = fileName/);
+  assert.match(script, /pdfDownloadButton\.addEventListener\('click', downloadPdfPreview\)/);
+  const resetPdfPreviewSource = script.match(/function resetPdfPreview\(\) \{[\s\S]*?\n\}/)?.[0] || '';
+  assert.match(resetPdfPreviewSource, /capturePdfViewState\(\) \|\| pdfPreviewState\.savedView/);
+  assert.match(resetPdfPreviewSource, /queuePdfRender\(0, pdfPreviewState\.savedView\)/);
+  assert.doesNotMatch(resetPdfPreviewSource, /scrollTop\s*=\s*0/);
+  assert.doesNotMatch(resetPdfPreviewSource, /scrollLeft\s*=\s*0/);
+  assert.doesNotMatch(script, /pdfPreview\.addEventListener\('dblclick'/);
+  assert.doesNotMatch(script, /previewPane\.addEventListener\('dblclick'/);
+  assert.match(script, /function capturePdfViewState\(/);
+  assert.match(script, /async function restorePdfViewState\(/);
+  assert.match(script, /capturePdfViewState\(\) \|\| pdfPreviewState\.savedView/);
+  assert.match(script, /loadPdfPreview\(pdfUrl, state\.mainDocument, '', previousPdfView\)/);
   assert.match(script, /jumpSourceToPdf/);
   assert.match(script, /codeEditor\.on\('click'/);
   assert.match(script, /jumpSourceToPdf\(position\)/);
   assert.match(script, /jumpPdfToSource/);
+  assert.match(script, /async function jumpPdfToSource\(event\) \{\s*if \(!event\.altKey\) return;/);
+  assert.match(script, /!domEvent\?\.altKey/);
+  assert.match(script, /if \(event\.key === 'Alt'\)/);
+  assert.doesNotMatch(script, /Ctrl\+单击/);
+  assert.match(script, /event\.target\.closest\?\.\('\.pdf-page-shell'\)/);
   assert.match(script, /\/api\/synctex\/view/);
   assert.match(script, /\/api\/synctex\/edit/);
   assert.match(script, /document\.title = `LocalTex-\$\{data\.project\.name\}`/);
+  assert.match(script, /function setCopyShareFeedback\(/);
+  assert.match(script, /setCopyShareFeedback\('copied'\)/);
+  assert.match(script, /showToast\('安全分享链接已复制。'\)/);
+  assert.match(script, /干净编译成功/);
   assert.doesNotMatch(script, /document\.title = `\$\{fileName\}/);
   assert.doesNotMatch(script, /Ctrl-Enter|Command-Enter/);
 
@@ -265,8 +430,18 @@ test('serves the editor and local configuration', async () => {
   assert.match(styles, /\.sidebar-title-toggle/);
   assert.match(styles, /\.project-open-area:focus-visible/);
   assert.match(styles, /\.code-editor \.ace_comment/);
+  assert.match(styles, /\.editor-findbar/);
+  assert.match(styles, /\.editor-surface\.findbar-open/);
+  assert.match(styles, /inset: var\(--editor-findbar-height, 0\) 0 0/);
+  assert.match(styles, /\.tree-compile-target/);
   assert.match(styles, /\.pdf-sync-marker/);
-  assert.match(styles, /#pdfPreview\[hidden\] \+ \.pdf-sync-hint/);
+  assert.match(styles, /#pdfPreview\[hidden\] \+ \.pdf-preview-controls/);
+  assert.match(styles, /\.pdf-reset-zoom-button/);
+  assert.match(styles, /\.pdf-download-button/);
+  assert.match(styles, /\.pdf-page-indicator/);
+  assert.match(styles, /#pdfPreview\.is-panning/);
+  assert.match(styles, /cursor: grabbing !important/);
+  assert.match(styles, /\.pdf-pages\s*\{[\s\S]{0,120}width: max-content/);
   assert.match(styles, /min-width: 156px/);
   assert.match(styles, /bottom: 3px/);
   assert.match(styles, /opacity: 0\.86/);
@@ -280,11 +455,47 @@ test('serves the editor and local configuration', async () => {
   assert.match(styles, /\.tree-folder-icon/);
   assert.match(styles, /\.tree-file-icon\.tex/);
   assert.match(styles, /\.share-host-control/);
+  assert.match(styles, /#copyShareButton\[data-state="copied"\]/);
   assert.match(styles, /\.host-service-control/);
   assert.match(styles, /\.service-stopped-screen/);
   assert.match(styles, /\.share-toggle-button\[data-state="enabled"\]/);
   assert.match(styles, /\.pdf-page-canvas/);
+  assert.match(styles, /\.pdf-text-layer\s*\{[\s\S]{0,900}user-select: text/);
+  assert.match(styles, /\.pdf-text-layer ::selection/);
+  assert.match(styles, /\.pdf-text-layer \.endOfContent/);
+  assert.match(styles, /\.pdf-text-layer\.selecting \.endOfContent/);
+  assert.match(styles, /#pdfPreview\.sync-source-ready \.pdf-text-layer \*/);
+  assert.match(styles, /cursor: crosshair !important/);
   assert.match(styles, /\.pdf-render-status/);
+  assert.match(styles, /--codex-width:/);
+  assert.match(styles, /\.workspace-layout\.codex-collapsed/);
+  assert.match(styles, /\.codex-panel\s*\{[\s\S]{0,180}display: flex/);
+  assert.match(styles, /\.codex-edge-button\s*\{[\s\S]{0,180}position: absolute/);
+  assert.match(styles, /\.codex-history-list\s*\{/);
+  assert.match(styles, /\.codex-history\.collapsed \.codex-history-body/);
+  assert.match(styles, /\.codex-workspace-select/);
+  assert.match(styles, /html\[data-theme="dark"\] \.codex-rename-form input/);
+  assert.match(styles, /html\[data-theme="dark"\] \.codex-model-picker/);
+  assert.match(styles, /\.codex-reasoning-picker\[data-effort="xhigh"\]/);
+  assert.match(styles, /\.codex-permission-picker\[data-mode="full-access"\]/);
+  assert.match(styles, /\.codex-message-body \.katex-display/);
+  assert.match(styles, /\.codex-conversation-refresh\s*\{/);
+  assert.match(styles, /\.codex-conversation-refresh\s*\{[\s\S]{0,140}margin-left: auto/);
+  assert.match(styles, /#codexPrompt\s*\{[\s\S]{0,240}padding: 9px 10px/);
+  assert.match(styles, /@keyframes codex-refresh-spin/);
+  assert.match(styles, /\.codex-turn-divider\s*\{/);
+  assert.match(styles, /linear-gradient\(90deg, transparent, var\(--line-strong\)/);
+  assert.match(styles, /\.codex-message-body pre\[data-language\]/);
+  assert.match(styles, /\.codex-message\.activity\.failed \.codex-message-body/);
+  assert.match(styles, /\.codex-thinking-body\s*\{/);
+  assert.match(styles, /@keyframes codex-thinking-dot/);
+  assert.match(styles, /\.dirty-indicator\[hidden\]\s*\{[\s\S]{0,100}visibility: hidden/);
+  assert.match(styles, /@container \(max-width: 360px\)[\s\S]{0,1400}\.dirty-indicator/);
+  assert.match(styles, /#saveStatus\s*\{[\s\S]{0,120}width: 76px/);
+  assert.match(styles, /html\[data-theme="dark"\] \.codex-message-body \.codex-inline-code/);
+  assert.match(styles, /background: #10191d/);
+  assert.match(styles, /color: #edf5f2/);
+  assert.doesNotMatch(styles, /\.codex-launcher\s*\{/);
 
   const configResponse = await fetch(`${baseUrl}/api/config`);
   assert.equal(configResponse.status, 200);
@@ -296,9 +507,584 @@ test('serves the editor and local configuration', async () => {
   assert.equal(config.service.active, true);
   assert.equal(config.service.controllerMode, 'background');
   assert.equal(config.service.canControl, true);
+  assert.equal(config.codex.available, true);
+  assert.equal(config.codex.canUse, true);
+  assert.equal(config.codex.access, 'host-only');
+  assert.equal(config.codex.permissionMode, 'read-only');
+  assert.equal(config.codex.model, '');
+  assert.equal(config.codex.reasoningEffort, '');
+  assert.equal(config.codex.sandbox, 'read-only');
   if (config.compiler) {
     assert.match(config.compilerPath, /Local_Tex[\\/]tools[\\/]miktex/i);
   }
+});
+
+test('validates Codex requests before starting a local agent', async () => {
+  const response = await fetch(`${baseUrl}/api/codex/runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: '', mainFile: 'main.tex' }),
+  });
+  const result = await response.json();
+  assert.equal(response.status, 400);
+  assert.match(result.error, /Codex/);
+
+  const invalidThreadResponse = await fetch(`${baseUrl}/api/codex/runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: '检查当前论文', threadId: '../another-session' }),
+  });
+  const invalidThreadResult = await invalidThreadResponse.json();
+  assert.equal(invalidThreadResponse.status, 400);
+  assert.match(invalidThreadResult.error, /对话标识无效/);
+});
+
+test('does not reveal the host Codex configuration to collaborators', () => {
+  const status = createCodexService().status(false);
+  assert.equal(status.canUse, false);
+  assert.equal(status.configured, false);
+  assert.equal(status.authDetected, false);
+  assert.equal(status.configSource, 'hidden');
+  assert.equal(status.model, 'hidden');
+  assert.equal(status.configuredModel, 'hidden');
+  assert.equal(status.reasoningEffort, 'hidden');
+  assert.equal(status.configuredReasoningEffort, 'hidden');
+});
+
+test('lists the Codex models available to the current local account', async () => {
+  const calls = [];
+  const service = createCodexService({
+    historyClient: {
+      async request(method, params) {
+        calls.push({ method, params });
+        return {
+          data: [{
+            id: 'gpt-5.6-sol',
+            displayName: 'GPT-5.6-Sol',
+            description: 'Latest frontier agentic coding model.',
+            defaultReasoningEffort: 'low',
+            supportedReasoningEfforts: [
+              { reasoningEffort: 'medium' },
+              { reasoningEffort: 'high' },
+              { reasoningEffort: 'xhigh' },
+            ],
+            inputModalities: ['text', 'image'],
+            isDefault: true,
+          }],
+        };
+      },
+      close() {},
+    },
+  });
+  const result = await service.listModels();
+  assert.equal(calls[0].method, 'model/list');
+  assert.deepEqual(calls[0].params, { includeHidden: false });
+  assert.equal(result.models[0].id, 'gpt-5.6-sol');
+  assert.equal(result.models[0].isDefault, true);
+  assert.deepEqual(result.models[0].supportedReasoningEfforts, ['medium', 'high', 'xhigh']);
+  service.shutdown();
+});
+
+test('lets the host persistently switch Codex permissions, model, and reasoning effort', async () => {
+  try {
+    const fullResponse = await fetch(`${baseUrl}/api/codex/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        permissionMode: 'full-access',
+        model: 'gpt-5.6-sol',
+        reasoningEffort: 'xhigh',
+      }),
+    });
+    const full = await fullResponse.json();
+    assert.equal(fullResponse.status, 200);
+    assert.equal(full.codex.permissionMode, 'full-access');
+    assert.equal(full.codex.sandbox, 'danger-full-access');
+    assert.equal(full.codex.networkAccessEnabled, true);
+    assert.equal(full.codex.webSearchMode, 'live');
+    assert.equal(full.codex.model, 'gpt-5.6-sol');
+    assert.equal(full.codex.reasoningEffort, 'xhigh');
+
+    const saved = JSON.parse(fs.readFileSync(
+      path.join(process.env.LOCAL_TEX_DATA_ROOT, 'codex-settings.json'),
+      'utf8',
+    ));
+    assert.equal(saved.permissionMode, 'full-access');
+    assert.equal(saved.model, 'gpt-5.6-sol');
+    assert.equal(saved.reasoningEffort, 'xhigh');
+
+    const invalidResponse = await fetch(`${baseUrl}/api/codex/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reasoningEffort: 'ultra' }),
+    });
+    const invalid = await invalidResponse.json();
+    assert.equal(invalidResponse.status, 400);
+    assert.match(invalid.error, /推理强度无效/);
+  } finally {
+    const resetResponse = await fetch(`${baseUrl}/api/codex/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ permissionMode: 'read-only', model: '', reasoningEffort: '' }),
+    });
+    assert.equal(resetResponse.status, 200);
+  }
+});
+
+test('uses the shared Codex history service for listing, reading, and native renaming', async () => {
+  const calls = [];
+  let storedName = '';
+  const historyClient = {
+    async request(method, params) {
+      calls.push({ method, params });
+      if (method === 'thread/list') {
+        return {
+          data: [{
+            id: 'thread-global-1',
+            name: storedName || null,
+            preview: '历史论文检查',
+            cwd: testWorkspace,
+            createdAt: 100,
+            updatedAt: 110,
+            recencyAt: 120,
+            source: 'cli',
+            modelProvider: 'openai',
+            status: { type: 'idle' },
+            turns: [],
+          }],
+          nextCursor: 'next-page',
+        };
+      }
+      if (method === 'thread/name/set') {
+        storedName = params.name;
+        return {};
+      }
+      if (method === 'thread/read') {
+        return {
+          thread: {
+            id: 'thread-global-1',
+            name: storedName || null,
+            preview: '历史论文检查',
+            cwd: testWorkspace,
+            createdAt: 100,
+            updatedAt: 120,
+            source: 'cli',
+            modelProvider: 'openai',
+            status: { type: 'idle' },
+            turns: [],
+          },
+        };
+      }
+      if (method === 'thread/turns/list') {
+        return {
+          data: [{
+              id: 'turn-1',
+              status: 'completed',
+              startedAt: 115,
+              items: [
+                {
+                  id: 'user-1',
+                  type: 'userMessage',
+                  content: [{
+                    type: 'text',
+                    text: 'LocalTeX 上下文\n\n用户要求：\n检查算法章节\n\n---\n\n当前文件内容',
+                  }],
+                },
+                {
+                  id: 'change-1',
+                  type: 'fileChange',
+                  status: 'completed',
+                  changes: [{ path: path.join(testWorkspace, 'main.tex'), kind: 'update' }],
+                },
+                { id: 'assistant-1', type: 'agentMessage', text: '建议如下' },
+              ],
+            }],
+          nextCursor: null,
+        };
+      }
+      throw new Error(`Unexpected method: ${method}`);
+    },
+    close() {},
+  };
+  const service = createCodexService({ historyClient });
+
+  const list = await service.listThreads({ limit: 25, searchTerm: '论文', cwd: testWorkspace });
+  assert.equal(list.threads.length, 1);
+  assert.equal(list.threads[0].cwd, testWorkspace);
+  assert.equal(list.nextCursor, 'next-page');
+  assert.equal(calls[0].method, 'thread/list');
+  assert.equal(calls[0].params.sortKey, 'recency_at');
+  assert.equal(calls[0].params.cwd, testWorkspace);
+  assert.deepEqual(calls[0].params.sourceKinds, [
+    'cli',
+    'vscode',
+    'exec',
+    'appServer',
+    'unknown',
+  ]);
+
+  const thread = await service.readThread('thread-global-1');
+  const readCall = calls.find((call) => call.method === 'thread/read');
+  const turnsCall = calls.find((call) => call.method === 'thread/turns/list');
+  assert.equal(readCall.params.includeTurns, false);
+  assert.equal(turnsCall.params.itemsView, 'summary');
+  assert.equal(turnsCall.params.sortDirection, 'desc');
+  assert.deepEqual(thread.messages.map(({ role, text }) => ({ role, text })), [
+    { role: 'user', text: '检查算法章节' },
+    { role: 'activity', text: '修改 `main.tex`' },
+    { role: 'assistant', text: '建议如下' },
+  ]);
+
+  const renamed = await service.renameThread('thread-global-1', '算法章节复核');
+  assert.equal(renamed.name, '算法章节复核');
+  assert.equal(calls.at(-2).method, 'thread/name/set');
+  assert.equal(calls.at(-2).params.name, '算法章节复核');
+  service.shutdown();
+});
+
+test('limits long Codex history refreshes to paginated summary turns', async () => {
+  const calls = [];
+  const historyClient = {
+    async request(method, params) {
+      calls.push({ method, params });
+      if (method === 'thread/read') {
+        return {
+          thread: {
+            id: 'thread-long-history',
+            name: '长历史',
+            preview: '最近一轮',
+            cwd: testWorkspace,
+            createdAt: 100,
+            updatedAt: 500,
+            source: 'exec',
+            modelProvider: 'openai',
+            status: { type: 'idle' },
+            turns: [],
+          },
+        };
+      }
+      if (method === 'thread/turns/list') {
+        const page = params.cursor ? Number(params.cursor) : 0;
+        const data = Array.from({ length: 50 }, (_, index) => {
+          const turnNumber = 250 - (page * 50) - index;
+          return {
+            id: `turn-${turnNumber}`,
+            status: 'completed',
+            startedAt: turnNumber,
+            items: [{
+              id: `assistant-${turnNumber}`,
+              type: 'agentMessage',
+              text: `回答 ${turnNumber}`,
+            }],
+          };
+        });
+        return { data, nextCursor: String(page + 1) };
+      }
+      throw new Error(`Unexpected method: ${method}`);
+    },
+    close() {},
+  };
+  const service = createCodexService({ historyClient });
+
+  const thread = await service.readThread('thread-long-history');
+  const turnCalls = calls.filter((call) => call.method === 'thread/turns/list');
+  assert.equal(turnCalls.length, 4);
+  assert.ok(turnCalls.every((call) => call.params.itemsView === 'summary'));
+  assert.equal(thread.loadedTurnCount, 200);
+  assert.equal(thread.historyTruncated, true);
+  assert.equal(thread.messages.length, 200);
+  assert.equal(thread.messages[0].text, '回答 51');
+  assert.equal(thread.messages.at(-1).text, '回答 250');
+  service.shutdown();
+});
+
+test('resumes the Codex thread selected from conversation history', async () => {
+  const originalThreadWorkspace = path.join(testRoot, 'other-codex-workspace');
+  fs.mkdirSync(originalThreadWorkspace, { recursive: true });
+  const historyClient = {
+    async request(method, params) {
+      assert.equal(method, 'thread/read');
+      assert.equal(params.threadId, 'thread-history-1');
+      assert.equal(params.includeTurns, false);
+      return {
+        thread: {
+          id: 'thread-history-1',
+          name: '其他项目对话',
+          preview: '继续检查',
+          cwd: originalThreadWorkspace,
+          createdAt: 100,
+          updatedAt: 120,
+          source: 'cli',
+          modelProvider: 'openai',
+          status: { type: 'idle' },
+          turns: [],
+        },
+      };
+    },
+    close() {},
+  };
+  const service = createCodexService({ historyClient });
+  service.setPermissionMode('full-access');
+  service.setModel('gpt-5.6-sol');
+  service.setReasoningEffort('xhigh');
+  let resumedThreadId = '';
+  let resumedOptions = null;
+  let submittedPrompt = '';
+  const fakeThread = {
+    async runStreamed(prompt) {
+      submittedPrompt = prompt;
+      return {
+        events: (async function* events() {
+          yield { type: 'thread.started', thread_id: 'thread-history-1' };
+          yield {
+            type: 'item.completed',
+            item: { type: 'agent_message', id: 'message-1', text: '历史对话已恢复' },
+          };
+          yield { type: 'turn.completed', usage: {} };
+        }()),
+      };
+    },
+  };
+  service.client = async () => ({
+    resumeThread(threadId, options) {
+      resumedThreadId = threadId;
+      resumedOptions = options;
+      return fakeThread;
+    },
+    startThread() {
+      throw new Error('should resume the selected thread');
+    },
+  });
+
+  const run = await service.start(
+    { id: 'history-project', path: testWorkspace, mainFile: 'main.tex' },
+    { prompt: '继续检查这篇论文', threadId: 'thread-history-1', newThread: false },
+  );
+  let doneEvent;
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Codex history test timed out')), 2_000);
+    service.subscribe(run.id, 'history-project', 0, (event) => {
+      if (event.type !== 'done') return;
+      doneEvent = event;
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+
+  assert.equal(resumedThreadId, 'thread-history-1');
+  assert.equal(resumedOptions.workingDirectory, originalThreadWorkspace);
+  assert.equal(resumedOptions.sandboxMode, 'danger-full-access');
+  assert.equal(resumedOptions.approvalPolicy, 'never');
+  assert.equal(resumedOptions.networkAccessEnabled, true);
+  assert.equal(resumedOptions.webSearchMode, 'live');
+  assert.equal(resumedOptions.model, 'gpt-5.6-sol');
+  assert.equal(resumedOptions.modelReasoningEffort, 'xhigh');
+  assert.match(submittedPrompt, /当前为 Full access/);
+  assert.match(submittedPrompt, /最终回复必须以“修改总结：”开头/);
+  assert.doesNotMatch(submittedPrompt, /本次运行是只读分析/);
+  assert.equal(doneEvent.threadId, 'thread-history-1');
+  assert.deepEqual(doneEvent.finalAssistant, {
+    messageId: 'message-1',
+    text: '历史对话已恢复',
+    complete: true,
+  });
+  const fullSnapshot = service.snapshot(run.id, 'history-project', 0);
+  assert.equal(fullSnapshot.run.status, 'completed');
+  assert.equal(fullSnapshot.lastSequence, doneEvent.sequence);
+  assert.equal(fullSnapshot.events.at(-1).type, 'done');
+  const assistantEvent = fullSnapshot.events.find((event) => event.type === 'assistant');
+  const recoveredSnapshot = service.snapshot(run.id, 'history-project', assistantEvent.sequence - 1);
+  assert.deepEqual(
+    recoveredSnapshot.events.map((event) => event.type),
+    ['assistant', 'usage', 'done'],
+  );
+  assert.equal(recoveredSnapshot.events.at(-1).finalAssistant.text, '历史对话已恢复');
+  const terminalSnapshot = service.snapshot(run.id, 'history-project', doneEvent.sequence - 1);
+  assert.deepEqual(terminalSnapshot.events, [doneEvent]);
+  service.shutdown();
+});
+
+test('waits for the app-server context compaction notification', async () => {
+  const client = createCodexAppServerClient();
+  const notificationPromise = client.waitForNotification((message) => (
+    message.method === 'thread/compacted'
+    && message.params?.threadId === 'thread-notification'
+  ));
+  client.handleMessage(null, JSON.stringify({
+    method: 'thread/compacted',
+    params: { threadId: 'thread-notification', turnId: 'compact-turn' },
+  }));
+  const notification = await notificationPromise;
+  assert.equal(notification.params.turnId, 'compact-turn');
+  client.close();
+});
+
+test('compacts a full Codex context and returns the prompt for retry', async () => {
+  const calls = [];
+  const historyClient = {
+    async request(method, params) {
+      calls.push({ method, params });
+      if (method === 'thread/read') {
+        assert.equal(params.includeTurns, false);
+        return {
+          thread: {
+            id: 'thread-context-full',
+            name: '长对话',
+            preview: '继续修改论文',
+            cwd: testWorkspace,
+            createdAt: 100,
+            updatedAt: 120,
+            source: 'exec',
+            modelProvider: 'openai',
+            status: { type: 'idle' },
+            turns: [],
+          },
+        };
+      }
+      if (method === 'thread/resume') return { thread: { id: params.threadId } };
+      if (method === 'thread/compact/start') return {};
+      if (method === 'thread/unsubscribe') return {};
+      throw new Error(`Unexpected method: ${method}`);
+    },
+    waitForNotification(predicate) {
+      const notification = {
+        method: 'thread/compacted',
+        params: { threadId: 'thread-context-full', turnId: 'compact-turn' },
+      };
+      assert.equal(predicate(notification), true);
+      return Promise.resolve(notification);
+    },
+    close() {},
+  };
+  const service = createCodexService({ historyClient });
+  const fakeThread = {
+    async runStreamed() {
+      return {
+        events: (async function* events() {
+          yield {
+            type: 'turn.failed',
+            error: {
+              message: 'The model context window has been exceeded.',
+              codexErrorInfo: 'contextWindowExceeded',
+            },
+          };
+        }()),
+      };
+    },
+  };
+  service.client = async () => ({
+    resumeThread() {
+      return fakeThread;
+    },
+    startThread() {
+      throw new Error('a full existing thread should be resumed');
+    },
+  });
+
+  const retryPrompt = '继续修改论文的实验章节';
+  const run = await service.start(
+    { id: 'context-project', path: testWorkspace, mainFile: 'main.tex' },
+    {
+      prompt: retryPrompt,
+      threadId: 'thread-context-full',
+      newThread: false,
+    },
+  );
+  let recoveryEvent;
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Codex compaction test timed out')), 2_000);
+    service.subscribe(run.id, 'context-project', 0, (event) => {
+      if (event.type !== 'error') return;
+      recoveryEvent = event;
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+
+  assert.equal(recoveryEvent.recoverable, 'context-window');
+  assert.equal(recoveryEvent.retryPrompt, retryPrompt);
+  assert.match(recoveryEvent.message, /上下文已自动压缩/);
+  assert.deepEqual(
+    calls.slice(1).map((call) => call.method),
+    ['thread/resume', 'thread/compact/start', 'thread/unsubscribe'],
+  );
+  assert.equal(calls[1].params.excludeTurns, true);
+  service.shutdown();
+});
+
+test('reports completed Codex file changes even without a final agent message', async () => {
+  const service = createCodexService({
+    historyClient: {
+      async request() {
+        throw new Error('history should not be read for a new thread');
+      },
+      close() {},
+    },
+  });
+  const fakeThread = {
+    async runStreamed() {
+      return {
+        events: (async function* events() {
+          yield { type: 'thread.started', thread_id: 'thread-file-change-1' };
+          yield {
+            type: 'item.completed',
+            item: {
+              type: 'file_change',
+              id: 'file-change-1',
+              status: 'completed',
+              changes: [
+                { path: path.join(testWorkspace, 'main.tex'), kind: 'update' },
+                { path: path.join(testWorkspace, 'sections', 'method.tex'), kind: 'add' },
+              ],
+            },
+          };
+          yield { type: 'turn.completed', usage: {} };
+        }()),
+      };
+    },
+  };
+  service.client = async () => ({
+    startThread() {
+      return fakeThread;
+    },
+    resumeThread() {
+      throw new Error('a new thread should not be resumed');
+    },
+  });
+
+  const run = await service.start(
+    { id: 'file-change-project', path: testWorkspace, mainFile: 'main.tex' },
+    { prompt: '修改论文文件', newThread: true },
+  );
+  const observedEvents = [];
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Codex file change test timed out')), 2_000);
+    service.subscribe(run.id, 'file-change-project', 0, (event) => {
+      observedEvents.push(event);
+      if (event.type !== 'done') return;
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+
+  const fileChange = observedEvents.find((event) => event.type === 'file-change');
+  assert.deepEqual(fileChange.changes, [
+    { path: 'main.tex', kind: 'update' },
+    { path: 'sections/method.tex', kind: 'add' },
+  ]);
+  assert.match(fileChange.text, /修改 `main\.tex`/);
+  assert.match(fileChange.text, /新增 `sections\/method\.tex`/);
+  const fallback = observedEvents.find((event) => (
+    event.type === 'assistant' && event.messageId.startsWith('localtex-result-')
+  ));
+  assert.match(fallback.text, /修改总结：/);
+  assert.match(fallback.text, /已按要求处理：修改论文文件/);
+  assert.match(fallback.text, /修改 `main\.tex`/);
+  assert.match(fallback.text, /新增 `sections\/method\.tex`/);
+  const done = observedEvents.find((event) => event.type === 'done');
+  assert.equal(done.filesChanged, true);
+  assert.match(done.message, /修改 2 个文件/);
+  service.shutdown();
 });
 
 test('ships the modern Windows Explorer folder picker', async () => {
@@ -309,6 +1095,18 @@ test('ships the modern Windows Explorer folder picker', async () => {
   assert.match(pickerSource, /IFileOpenDialog/);
   assert.match(pickerSource, /FileOpenOptions\.PickFolders/);
   assert.match(pickerSource, /SetClientGuid/);
+});
+
+test('ignores Windows picker warnings when reading the selected path', () => {
+  const selectedPath = String.raw`D:\papers\example-project`;
+  const output = [
+    '[WARNING] Ignore caches that are heterogeneous',
+    `__LOCALTEX_SELECTED_PATH__:${selectedPath}`,
+    '',
+  ].join('\r\n');
+
+  assert.equal(parseLocalPickerOutput(output), selectedPath);
+  assert.equal(parseLocalPickerOutput('[WARNING] Ignore caches that are heterogeneous\r\n'), '');
 });
 
 test('ships a detached reusable LocalTeX launcher', async () => {
@@ -364,20 +1162,20 @@ test('persists the host display name outside browser storage', async () => {
   const response = await fetch(`${baseUrl}/api/profile`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ collaboratorName: 'ExamplePaper Host' }),
+    body: JSON.stringify({ collaboratorName: 'LocalTeX Host' }),
   });
   const result = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(result.profile.collaboratorName, 'ExamplePaper Host');
+  assert.equal(result.profile.collaboratorName, 'LocalTeX Host');
 
   const persisted = JSON.parse(fs.readFileSync(
     path.join(process.env.LOCAL_TEX_DATA_ROOT, 'profile-settings.json'),
     'utf8',
   ));
-  assert.equal(persisted.collaboratorName, 'ExamplePaper Host');
+  assert.equal(persisted.collaboratorName, 'LocalTeX Host');
 
   const config = await (await fetch(`${baseUrl}/api/config`)).json();
-  assert.equal(config.profile.collaboratorName, 'ExamplePaper Host');
+  assert.equal(config.profile.collaboratorName, 'LocalTeX Host');
 });
 
 test('rejects paths outside the workspace', async () => {
@@ -675,6 +1473,13 @@ test('compiles the sample document and serves a PDF', { timeout: 120_000 }, asyn
     return;
   }
 
+  const buildRoot = path.join(testWorkspace, '.tex-build');
+  const stableBuildDirectory = path.join(buildRoot, 'main');
+  const staleMarker = path.join(stableBuildDirectory, 'stale-cache.marker');
+  fs.mkdirSync(stableBuildDirectory, { recursive: true });
+  fs.writeFileSync(path.join(stableBuildDirectory, 'main.aux'), '\\THIS_STALE_AUX_MUST_NOT_BE_READ\n', 'utf8');
+  fs.writeFileSync(staleMarker, 'old build', 'utf8');
+
   const compileResponse = await fetch(`${baseUrl}/api/compile`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -683,6 +1488,31 @@ test('compiles the sample document and serves a PDF', { timeout: 120_000 }, asyn
   const compileResult = await compileResponse.json();
   assert.equal(compileResponse.status, 200, compileResult.output);
   assert.equal(compileResult.ok, true);
+  assert.equal(compileResult.cleanBuild, true);
+  assert.equal(compileResult.bibliographyTool, 'BibTeX');
+  assert.match(compileResult.output, /干净编译：本次未读取上一次的辅助文件/);
+  assert.equal(fs.existsSync(staleMarker), false);
+  assert.equal(fs.existsSync(path.join(stableBuildDirectory, 'main.pdf')), true);
+  assert.equal(fs.existsSync(path.join(stableBuildDirectory, 'main.bbl')), true);
+  assert.deepEqual(
+    fs.readdirSync(buildRoot).filter((name) => /^\.main\.(?:run|previous)-/.test(name)),
+    [],
+  );
+
+  fs.writeFileSync(staleMarker, 'must disappear on the next compile too', 'utf8');
+  const secondCompileResponse = await fetch(`${baseUrl}/api/compile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mainFile: 'main.tex' }),
+  });
+  const secondCompileResult = await secondCompileResponse.json();
+  assert.equal(secondCompileResponse.status, 200, secondCompileResult.output);
+  assert.equal(secondCompileResult.cleanBuild, true);
+  assert.equal(fs.existsSync(staleMarker), false);
+  assert.deepEqual(
+    fs.readdirSync(buildRoot).filter((name) => /^\.main\.(?:run|previous)-/.test(name)),
+    [],
+  );
 
   const pdfResponse = await fetch(`${baseUrl}/api/pdf?main=main.tex`);
   assert.equal(pdfResponse.status, 200);
@@ -694,6 +1524,9 @@ test('compiles the sample document and serves a PDF', { timeout: 120_000 }, asyn
   const loadingTask = pdfjs.getDocument({ data: pdfBytes, disableWorker: true });
   const parsedPdf = await loadingTask.promise;
   assert.equal(parsedPdf.numPages, 1);
+  const parsedPage = await parsedPdf.getPage(1);
+  const textContent = await parsedPage.getTextContent();
+  assert.match(textContent.items.map((item) => item.str || '').join(' '), /LocalTeX First Document/);
   await loadingTask.destroy();
 
   const forwardResponse = await fetch(`${baseUrl}/api/synctex/view`, {

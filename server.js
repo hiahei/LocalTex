@@ -6,11 +6,13 @@ const path = require('node:path');
 const { randomBytes, randomUUID, timingSafeEqual } = require('node:crypto');
 const { spawn, spawnSync } = require('node:child_process');
 const { attachCollaborationServer } = require('./collaboration-server');
+const { createCodexService } = require('./codex-service');
 
 const APP_ROOT = __dirname;
 const PUBLIC_ROOT = path.join(APP_ROOT, 'public');
 const ACE_ASSETS_ROOT = path.join(APP_ROOT, 'node_modules', 'ace-builds', 'src-min-noconflict');
 const PDFJS_ASSETS_ROOT = path.join(APP_ROOT, 'node_modules', 'pdfjs-dist');
+const KATEX_ASSETS_ROOT = path.join(APP_ROOT, 'node_modules', 'katex', 'dist');
 const DEFAULT_WORKSPACE_ROOT = path.resolve(
   process.env.LOCAL_TEX_WORKSPACE || path.join(APP_ROOT, 'workspace'),
 );
@@ -19,12 +21,14 @@ const PROJECTS_FILE = path.join(DATA_ROOT, 'projects.json');
 const LAN_SETTINGS_FILE = path.join(DATA_ROOT, 'lan-settings.json');
 const SERVICE_SETTINGS_FILE = path.join(DATA_ROOT, 'service-settings.json');
 const PROFILE_SETTINGS_FILE = path.join(DATA_ROOT, 'profile-settings.json');
+const CODEX_SETTINGS_FILE = path.join(DATA_ROOT, 'codex-settings.json');
 const SERVICE_PID_FILE = path.join(DATA_ROOT, 'localtex.pid');
 const HOST = process.env.LOCAL_TEX_HOST || '127.0.0.1';
 const PORT = Number(process.env.LOCAL_TEX_PORT || 4177);
 const NETWORK_CAPABLE = !['127.0.0.1', 'localhost', '::1'].includes(HOST);
 const MAX_BODY_BYTES = 30 * 1024 * 1024;
 const BUILD_DIRECTORY = '.tex-build';
+const LOCAL_PICKER_RESULT_PREFIX = '__LOCALTEX_SELECTED_PATH__:';
 
 const ignoredNames = new Set([
   '.git',
@@ -82,6 +86,8 @@ const mimeTypes = {
   '.svg': 'image/svg+xml; charset=utf-8',
   '.tex': 'text/plain; charset=utf-8',
   '.ttf': 'font/ttf',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
   '.wasm': 'application/wasm',
 };
 
@@ -93,6 +99,8 @@ let lanSettings = null;
 let collaborationServer = null;
 let serviceSettings = null;
 let profileSettings = null;
+let codexSettings = null;
+const codexService = createCodexService();
 
 function isLoopbackAddress(address = '') {
   const normalized = String(address).toLowerCase();
@@ -145,6 +153,42 @@ async function saveProfileSettings() {
   const temporaryFile = `${PROFILE_SETTINGS_FILE}.tmp`;
   await fsp.writeFile(temporaryFile, `${JSON.stringify(profileSettings, null, 2)}\n`, 'utf8');
   await fsp.rename(temporaryFile, PROFILE_SETTINGS_FILE);
+}
+
+async function saveCodexSettings() {
+  await fsp.mkdir(DATA_ROOT, { recursive: true });
+  const temporaryFile = `${CODEX_SETTINGS_FILE}.tmp`;
+  await fsp.writeFile(temporaryFile, `${JSON.stringify(codexSettings, null, 2)}\n`, 'utf8');
+  await fsp.rename(temporaryFile, CODEX_SETTINGS_FILE);
+}
+
+async function loadCodexSettings() {
+  if (codexSettings) return codexSettings;
+  await fsp.mkdir(DATA_ROOT, { recursive: true });
+  try {
+    const saved = JSON.parse(await fsp.readFile(CODEX_SETTINGS_FILE, 'utf8'));
+    const permissions = codexService.setPermissionMode(saved.permissionMode || 'read-only');
+    const model = codexService.setModel(saved.model || '');
+    const reasoningEffort = codexService.setReasoningEffort(saved.reasoningEffort || '');
+    codexSettings = {
+      permissionMode: permissions.mode,
+      model,
+      reasoningEffort,
+      updatedAt: saved.updatedAt || null,
+    };
+    return codexSettings;
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn(`Could not read Codex settings: ${error.message}`);
+  }
+  const permissions = codexService.setPermissionMode('read-only');
+  codexSettings = {
+    permissionMode: permissions.mode,
+    model: codexService.setModel(''),
+    reasoningEffort: codexService.setReasoningEffort(''),
+    updatedAt: null,
+  };
+  await saveCodexSettings();
+  return codexSettings;
 }
 
 async function loadProfileSettings() {
@@ -392,6 +436,16 @@ async function addProject(projectPath, preferredFile = '') {
   return project;
 }
 
+function parseLocalPickerOutput(output) {
+  for (const rawLine of String(output || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line.startsWith(LOCAL_PICKER_RESULT_PREFIX)) {
+      return line.slice(LOCAL_PICKER_RESULT_PREFIX.length);
+    }
+  }
+  return '';
+}
+
 function browseLocalPath(mode) {
   if (process.platform !== 'win32') throw new Error('Native file browsing is currently available on Windows only.');
 
@@ -405,7 +459,7 @@ function browseLocalPath(mode) {
     '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
     `Add-Type -Path '${modernFolderPickerSource}'`,
     "$selected = [LocalTeX.NativeDialogs.ModernFolderPicker]::Pick('选择 LaTeX 项目文件夹', '选择文件夹')",
-    'if (-not [string]::IsNullOrWhiteSpace($selected)) { Write-Output $selected }',
+    `if (-not [string]::IsNullOrWhiteSpace($selected)) { Write-Output ('${LOCAL_PICKER_RESULT_PREFIX}' + $selected) }`,
   ].join('; ');
   const fileScript = [
     'Add-Type -AssemblyName System.Windows.Forms',
@@ -417,7 +471,7 @@ function browseLocalPath(mode) {
     "$dialog.Filter = 'LaTeX files (*.tex)|*.tex|All files (*.*)|*.*'",
     '$dialog.Multiselect = $false',
     '$result = if ($foregroundHandle -eq [IntPtr]::Zero) { $dialog.ShowDialog() } else { $dialog.ShowDialog($owner) }',
-    'if ($result -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.FileName }',
+    `if ($result -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output ('${LOCAL_PICKER_RESULT_PREFIX}' + $dialog.FileName) }`,
   ].join('; ');
 
   return new Promise((resolve, reject) => {
@@ -446,7 +500,7 @@ function browseLocalPath(mode) {
     });
     child.on('close', (code) => {
       clearTimeout(timeout);
-      const output = Buffer.concat(stdout).toString('utf8').trim();
+      const output = parseLocalPickerOutput(Buffer.concat(stdout).toString('utf8'));
       const errorOutput = Buffer.concat(stderr).toString('utf8').trim();
       if (code !== 0) {
         reject(new Error(errorOutput || 'Could not open the local file picker.'));
@@ -474,6 +528,11 @@ function sendText(response, statusCode, value) {
     'Cache-Control': 'no-store',
   });
   response.end(value);
+}
+
+function sendServerEvent(response, event) {
+  response.write(`id: ${event.sequence}\n`);
+  response.write(`data: ${JSON.stringify(event)}\n\n`);
 }
 
 async function readJsonBody(request) {
@@ -695,6 +754,46 @@ function compiledArtifact(projectId, mainFile) {
   return { mainFile: normalizedMain, pdfPath: record.pdfPath, synctexPath };
 }
 
+async function prepareCleanBuildArea(buildParentDirectory, mainStem, stableBuildDirectory) {
+  const runPrefix = `.${mainStem}.run-`;
+  const previousPrefix = `.${mainStem}.previous-`;
+  const entries = await fsp.readdir(buildParentDirectory, { withFileTypes: true });
+  const runDirectories = entries
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith(runPrefix))
+    .map((entry) => path.join(buildParentDirectory, entry.name));
+  const previousDirectories = entries
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith(previousPrefix))
+    .map((entry) => path.join(buildParentDirectory, entry.name));
+
+  if (!fs.existsSync(stableBuildDirectory) && previousDirectories.length > 0) {
+    const recoveryDirectory = previousDirectories.shift();
+    await fsp.rename(recoveryDirectory, stableBuildDirectory);
+  }
+
+  await Promise.all(
+    [...runDirectories, ...previousDirectories]
+      .map((directory) => fsp.rm(directory, { recursive: true, force: true })),
+  );
+}
+
+async function publishCleanBuild(stagingDirectory, stableBuildDirectory, previousDirectory) {
+  const hadStableBuild = fs.existsSync(stableBuildDirectory);
+  if (hadStableBuild) await fsp.rename(stableBuildDirectory, previousDirectory);
+
+  try {
+    await fsp.rename(stagingDirectory, stableBuildDirectory);
+  } catch (error) {
+    if (hadStableBuild && !fs.existsSync(stableBuildDirectory) && fs.existsSync(previousDirectory)) {
+      await fsp.rename(previousDirectory, stableBuildDirectory);
+    }
+    throw error;
+  }
+
+  if (hadStableBuild) {
+    await fsp.rm(previousDirectory, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 async function compileTex(mainFile, workspaceRoot, projectId) {
   const normalizedMain = normalizeRelative(mainFile);
   if (path.extname(normalizedMain).toLowerCase() !== '.tex') {
@@ -723,83 +822,111 @@ async function compileTex(mainFile, workspaceRoot, projectId) {
   const mainName = path.basename(sourcePath);
   const mainStem = path.basename(sourcePath, '.tex');
   const relativeDirectory = path.dirname(normalizedMain) === '.' ? '' : path.dirname(normalizedMain);
-  const buildDirectory = resolveInside(
+  const buildParentDirectory = resolveInside(
     workspaceRoot,
-    path.join(BUILD_DIRECTORY, relativeDirectory, mainStem),
+    path.join(BUILD_DIRECTORY, relativeDirectory),
   );
-  await fsp.mkdir(buildDirectory, { recursive: true });
+  const stableBuildDirectory = path.join(buildParentDirectory, mainStem);
+  const runId = randomUUID();
+  const buildDirectory = path.join(buildParentDirectory, `.${mainStem}.run-${runId}`);
+  const previousDirectory = path.join(buildParentDirectory, `.${mainStem}.previous-${runId}`);
+  await fsp.mkdir(buildParentDirectory, { recursive: true });
+  await prepareCleanBuildArea(buildParentDirectory, mainStem, stableBuildDirectory);
+  await fsp.mkdir(buildDirectory);
 
-  let result;
-  let commandDescription;
+  try {
+    let result;
+    let commandDescription;
+    let buildSteps = 1;
+    let bibliographyTool = '';
 
-  if (compiler.kind === 'latexmk') {
-    const args = [
-      '-pdf',
-      '-interaction=nonstopmode',
-      '-halt-on-error',
-      '-file-line-error',
-      '-synctex=1',
-      `-outdir=${buildDirectory}`,
-      mainName,
-    ];
-    commandDescription = `latexmk ${args.join(' ')}`;
-    result = await runProcess(compiler.command, args, sourceDirectory);
-  } else if (compiler.kind === 'tectonic') {
-    const args = ['-X', 'compile', mainName, '--outdir', buildDirectory, '--synctex'];
-    commandDescription = `tectonic ${args.join(' ')}`;
-    result = await runProcess(compiler.command, args, sourceDirectory);
-  } else {
-    const args = [
-      '-interaction=nonstopmode',
-      '-halt-on-error',
-      '-file-line-error',
-      '-synctex=1',
-      `-output-directory=${buildDirectory}`,
-      mainName,
-    ];
-    commandDescription = `pdflatex ${args.join(' ')}`;
-    const runs = [await runProcess(compiler.command, args, sourceDirectory)];
+    if (compiler.kind === 'latexmk') {
+      const args = [
+        '-pdf',
+        '-interaction=nonstopmode',
+        '-halt-on-error',
+        '-file-line-error',
+        '-synctex=1',
+        `-outdir=${buildDirectory}`,
+        mainName,
+      ];
+      commandDescription = `latexmk ${args.join(' ')}`;
+      result = await runProcess(compiler.command, args, sourceDirectory);
+    } else if (compiler.kind === 'tectonic') {
+      const args = ['-X', 'compile', mainName, '--outdir', buildDirectory, '--synctex'];
+      commandDescription = `tectonic ${args.join(' ')}`;
+      result = await runProcess(compiler.command, args, sourceDirectory);
+    } else {
+      const args = [
+        '-interaction=nonstopmode',
+        '-halt-on-error',
+        '-file-line-error',
+        '-synctex=1',
+        `-output-directory=${buildDirectory}`,
+        mainName,
+      ];
+      commandDescription = `pdflatex ${args.join(' ')}`;
+      const runs = [await runProcess(compiler.command, args, sourceDirectory)];
 
-    const auxPath = path.join(buildDirectory, `${mainStem}.aux`);
-    const bibtex = commandPath('bibtex');
-    if (bibtex && fs.existsSync(auxPath)) {
-      const auxContents = await fsp.readFile(auxPath, 'utf8').catch(() => '');
-      if (auxContents.includes('\\bibdata')) {
-        runs.push(await runProcess(bibtex, [mainStem], buildDirectory, {
-          BIBINPUTS: `${sourceDirectory}${path.delimiter}`,
-          BSTINPUTS: `${sourceDirectory}${path.delimiter}`,
-        }));
+      const auxPath = path.join(buildDirectory, `${mainStem}.aux`);
+      const bibtex = commandPath('bibtex');
+      if (bibtex && fs.existsSync(auxPath)) {
+        const auxContents = await fsp.readFile(auxPath, 'utf8').catch(() => '');
+        if (auxContents.includes('\\bibdata')) {
+          bibliographyTool = 'BibTeX';
+          runs.push(await runProcess(bibtex, [mainStem], buildDirectory, {
+            BIBINPUTS: `${sourceDirectory}${path.delimiter}`,
+            BSTINPUTS: `${sourceDirectory}${path.delimiter}`,
+          }));
+        }
       }
+
+      if (runs.every((run) => run.code === 0)) {
+        runs.push(await runProcess(compiler.command, args, sourceDirectory));
+        runs.push(await runProcess(compiler.command, args, sourceDirectory));
+      }
+
+      buildSteps = runs.length;
+      result = {
+        code: runs.find((run) => run.code !== 0)?.code ?? 0,
+        durationMs: runs.reduce((sum, run) => sum + run.durationMs, 0),
+        output: runs.map((run, index) => `--- pass ${index + 1} ---\n${run.output}`).join('\n\n'),
+      };
     }
 
-    if (runs.every((run) => run.code === 0)) {
-      runs.push(await runProcess(compiler.command, args, sourceDirectory));
-      runs.push(await runProcess(compiler.command, args, sourceDirectory));
+    const stagedPdfPath = path.join(buildDirectory, `${mainStem}.pdf`);
+    const succeeded = result.code === 0 && fs.existsSync(stagedPdfPath);
+    const cleanBuildSummary = [
+      '[LocalTeX] 干净编译：本次未读取上一次的辅助文件。',
+      `[LocalTeX] 构建步骤：${buildSteps}${bibliographyTool ? `（包含 ${bibliographyTool}）` : ''}。`,
+    ].join('\n');
+    const output = `${cleanBuildSummary}\n$ ${commandDescription}\n\n${result.output}`;
+
+    if (succeeded) {
+      await publishCleanBuild(buildDirectory, stableBuildDirectory, previousDirectory);
     }
 
-    result = {
-      code: runs.find((run) => run.code !== 0)?.code ?? 0,
-      durationMs: runs.reduce((sum, run) => sum + run.durationMs, 0),
-      output: runs.map((run, index) => `--- pass ${index + 1} ---\n${run.output}`).join('\n\n'),
+    const pdfPath = succeeded ? path.join(stableBuildDirectory, `${mainStem}.pdf`) : '';
+    const record = {
+      ok: succeeded,
+      compiler: compiler.label,
+      command: commandDescription,
+      durationMs: result.durationMs,
+      output,
+      diagnostics: extractDiagnostics(output),
+      pdfAvailable: succeeded,
+      cleanBuild: true,
+      buildSteps,
+      bibliographyTool: bibliographyTool || null,
+      compiledAt: new Date().toISOString(),
     };
+
+    compileHistory.set(`${projectId}:${normalizedMain}`, { ...record, pdfPath });
+    return record;
+  } finally {
+    await fsp.rm(buildDirectory, { recursive: true, force: true }).catch(() => {});
+    await prepareCleanBuildArea(buildParentDirectory, mainStem, stableBuildDirectory).catch(() => {});
   }
-
-  const pdfPath = path.join(buildDirectory, `${mainStem}.pdf`);
-  const pdfExists = fs.existsSync(pdfPath);
-  const output = `$ ${commandDescription}\n\n${result.output}`;
-  const record = {
-    ok: result.code === 0 && pdfExists,
-    compiler: compiler.label,
-    command: commandDescription,
-    durationMs: result.durationMs,
-    output,
-    diagnostics: extractDiagnostics(output),
-    pdfAvailable: pdfExists,
-    compiledAt: new Date().toISOString(),
-  };
-
-  compileHistory.set(`${projectId}:${normalizedMain}`, { ...record, pdfPath });
-  return record;
 }
 
 async function serveFile(response, absolutePath, cache = false) {
@@ -973,11 +1100,167 @@ async function handleApi(request, response, url) {
       lan: lanView(hostRequest),
       service: serviceView(),
       profile: profileView(hostRequest),
+      codex: codexService.status(hostRequest),
     });
   }
 
   const project = await projectFromRequest(request, url);
   const workspaceRoot = project.path;
+
+  if (url.pathname.startsWith('/api/codex/')) {
+    if (!isHostRequest(request)) {
+      return sendJson(response, 403, { error: '当前 Codex 功能只允许 LocalTeX 主机使用。' });
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/codex/settings') {
+      return sendJson(response, 200, { codex: codexService.status(true) });
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/codex/models') {
+      try {
+        return sendJson(response, 200, await codexService.listModels());
+      } catch (error) {
+        return sendJson(response, 502, { error: error.message || '无法读取 Codex 模型列表。' });
+      }
+    }
+
+    if (request.method === 'PUT' && url.pathname === '/api/codex/settings') {
+      const body = await readJsonBody(request);
+      try {
+        let changed = false;
+        if (Object.prototype.hasOwnProperty.call(body, 'permissionMode')) {
+          const permissions = codexService.setPermissionMode(body.permissionMode);
+          codexSettings.permissionMode = permissions.mode;
+          changed = true;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, 'model')) {
+          codexSettings.model = codexService.setModel(body.model);
+          changed = true;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, 'reasoningEffort')) {
+          codexSettings.reasoningEffort = codexService.setReasoningEffort(body.reasoningEffort);
+          changed = true;
+        }
+        if (!changed) throw new Error('没有可更新的 Codex 设置。');
+        codexSettings.updatedAt = new Date().toISOString();
+        await saveCodexSettings();
+        return sendJson(response, 200, { codex: codexService.status(true) });
+      } catch (error) {
+        return sendJson(response, 400, { error: error.message || '无法更新 Codex 设置。' });
+      }
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/codex/threads') {
+      try {
+        const result = await codexService.listThreads({
+          cursor: url.searchParams.get('cursor') || '',
+          cwd: url.searchParams.get('cwd') || '',
+          limit: url.searchParams.get('limit') || 60,
+          searchTerm: url.searchParams.get('search') || '',
+        });
+        return sendJson(response, 200, result);
+      } catch (error) {
+        return sendJson(response, 502, { error: error.message || '无法读取 Codex 历史。' });
+      }
+    }
+
+    const threadMatch = url.pathname.match(/^\/api\/codex\/threads\/([^/]+)$/);
+    if (request.method === 'GET' && threadMatch) {
+      try {
+        const thread = await codexService.readThread(decodeURIComponent(threadMatch[1]));
+        return sendJson(response, 200, { thread });
+      } catch (error) {
+        return sendJson(response, 400, { error: error.message || '无法读取 Codex 对话。' });
+      }
+    }
+
+    const threadNameMatch = url.pathname.match(/^\/api\/codex\/threads\/([^/]+)\/name$/);
+    if (request.method === 'PUT' && threadNameMatch) {
+      const body = await readJsonBody(request);
+      try {
+        const thread = await codexService.renameThread(
+          decodeURIComponent(threadNameMatch[1]),
+          body.name,
+        );
+        return sendJson(response, 200, { thread });
+      } catch (error) {
+        return sendJson(response, 400, { error: error.message || '无法重命名 Codex 对话。' });
+      }
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/codex/runs') {
+      const body = await readJsonBody(request);
+      const mainFile = normalizeRelative(body.mainFile || project.mainFile || '');
+      const compileRecord = compileHistory.get(`${project.id}:${mainFile}`);
+      try {
+        const run = await codexService.start(project, body, compileRecord?.output || '');
+        return sendJson(response, 202, { run });
+      } catch (error) {
+        return sendJson(response, error.code === 'CODEX_BUSY' ? 409 : 400, {
+          error: error.message || '无法启动 Codex。',
+        });
+      }
+    }
+
+    const runMatch = url.pathname.match(/^\/api\/codex\/runs\/([^/]+)$/);
+    if (request.method === 'GET' && runMatch) {
+      try {
+        const snapshot = codexService.snapshot(
+          decodeURIComponent(runMatch[1]),
+          project.id,
+          url.searchParams.get('after') || 0,
+        );
+        return sendJson(response, 200, snapshot);
+      } catch (error) {
+        return sendJson(response, 404, { error: error.message || 'Codex 任务不存在。' });
+      }
+    }
+
+    const eventsMatch = url.pathname.match(/^\/api\/codex\/runs\/([^/]+)\/events$/);
+    if (request.method === 'GET' && eventsMatch) {
+      const runId = decodeURIComponent(eventsMatch[1]);
+      codexService.getJob(runId, project.id);
+      response.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      response.flushHeaders?.();
+      let keepAlive;
+      let subscription;
+      const forwardEvent = (event) => {
+        sendServerEvent(response, event);
+        if (event.type === 'done' || event.type === 'error') {
+          setImmediate(() => {
+            clearInterval(keepAlive);
+            subscription?.unsubscribe();
+            response.end();
+          });
+        }
+      };
+      subscription = codexService.subscribe(
+        runId,
+        project.id,
+        url.searchParams.get('after') || request.headers['last-event-id'],
+        forwardEvent,
+      );
+      keepAlive = setInterval(() => response.write(': keep-alive\n\n'), 20_000);
+      response.once('close', () => {
+        clearInterval(keepAlive);
+        subscription?.unsubscribe();
+      });
+      return;
+    }
+
+    const cancelMatch = url.pathname.match(/^\/api\/codex\/runs\/([^/]+)\/cancel$/);
+    if (request.method === 'POST' && cancelMatch) {
+      const run = codexService.cancel(decodeURIComponent(cancelMatch[1]), project.id);
+      return sendJson(response, 200, { run });
+    }
+
+    return sendJson(response, 404, { error: 'Unknown Codex endpoint.' });
+  }
 
   if (request.method === 'GET' && url.pathname === '/api/files') {
     return sendJson(response, 200, { files: await listWorkspace(workspaceRoot) });
@@ -1195,6 +1478,11 @@ async function requestHandler(request, response) {
       return await serveFile(response, resolveInside(PDFJS_ASSETS_ROOT, requestedAsset), true);
     }
 
+    if (request.method === 'GET' && url.pathname.startsWith('/vendor/katex/')) {
+      const requestedAsset = url.pathname.slice('/vendor/katex/'.length);
+      return await serveFile(response, resolveInside(KATEX_ASSETS_ROOT, requestedAsset), true);
+    }
+
     const requestedPath = url.pathname === '/' ? 'index.html' : url.pathname;
     const absolutePath = resolveInside(PUBLIC_ROOT, requestedPath);
     return await serveFile(response, absolutePath, false);
@@ -1249,6 +1537,7 @@ async function createAppServer() {
   await loadLanSettings();
   await loadServiceSettings();
   await loadProfileSettings();
+  await loadCodexSettings();
   const server = http.createServer(requestHandler);
   const collaboration = attachCollaborationServer(server, {
     authenticate: (request, url) => isWorkServiceActive() && isAuthorizedRequest(request, url),
@@ -1261,6 +1550,7 @@ async function createAppServer() {
   server.on('close', () => {
     if (collaborationServer === collaboration) collaborationServer = null;
     collaboration.close().catch(() => {});
+    codexService.shutdown();
   });
   return server;
 }
@@ -1313,4 +1603,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { createAppServer };
+module.exports = { createAppServer, parseLocalPickerOutput };

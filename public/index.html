@@ -12,6 +12,7 @@
       document.documentElement.dataset.theme = 'light';
     }
   </script>
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -54,7 +55,7 @@
             <div class="project-list-tools">
               <label class="project-search">
                 <span aria-hidden="true">⌕</span>
-                <input id="projectSearch" type="search" placeholder="搜索项目、路径或主文档" autocomplete="off" aria-label="搜索项目">
+                <input id="projectSearch" type="search" placeholder="搜索项目、路径或编译对象" autocomplete="off" aria-label="搜索项目">
               </label>
               <span id="projectCount" class="project-count">0 个项目</span>
             </div>
@@ -87,7 +88,7 @@
       </div>
     </header>
 
-    <main class="workspace-layout" id="workspaceLayout">
+    <main class="workspace-layout codex-collapsed" id="workspaceLayout">
       <aside class="sidebar" id="sidebarPane">
         <div class="pane-heading">
           <button class="sidebar-title-toggle" id="collapseSidebarButton" type="button" title="收起文件区" aria-label="收起文件区" aria-controls="sidebarPane" aria-expanded="true">
@@ -130,12 +131,24 @@
             </div>
           </div>
           <label class="main-document-control">
-            <span>主文档</span>
-            <select id="mainDocumentSelect" aria-label="选择主文档"></select>
+            <span>编译对象</span>
+            <select id="mainDocumentSelect" aria-label="选择编译对象"></select>
           </label>
         </div>
 
         <div class="editor-surface" id="editorSurface">
+          <div class="editor-findbar" id="editorFindbar" role="search" aria-label="在当前文件中查找" hidden>
+            <label class="editor-find-field">
+              <span class="editor-find-icon" aria-hidden="true"></span>
+              <input id="editorFindInput" type="search" autocomplete="off" spellcheck="false" placeholder="查找当前文件" aria-label="查找内容">
+              <output id="editorFindCount" aria-live="polite">0 / 0</output>
+            </label>
+            <div class="editor-find-actions">
+              <button id="editorFindPrevious" type="button" title="上一个（Shift+Enter）" aria-label="上一个匹配项"><span aria-hidden="true">↑</span></button>
+              <button id="editorFindNext" type="button" title="下一个（Enter）" aria-label="下一个匹配项"><span aria-hidden="true">↓</span></button>
+              <button id="editorFindClose" class="editor-find-close" type="button" title="关闭（Esc）" aria-label="关闭查找"><span aria-hidden="true">×</span></button>
+            </div>
+          </div>
           <div
             id="editor"
             class="code-editor"
@@ -189,7 +202,7 @@
       <section class="preview-pane" id="previewPane" aria-label="编译预览">
         <div class="preview-heading">
           <div class="tabs" role="tablist" aria-label="预览选项">
-            <button class="tab active" id="pdfTab" type="button" role="tab" aria-selected="true" title="双击恢复铺满预览">PDF 预览</button>
+            <button class="tab active" id="pdfTab" type="button" role="tab" aria-selected="true" title="查看 PDF 预览">PDF 预览</button>
             <button class="tab" id="logTab" type="button" role="tab" aria-selected="false">编译日志</button>
           </div>
           <div class="preview-heading-meta">
@@ -203,15 +216,26 @@
               <span></span><span></span><span></span><span></span>
             </div>
             <strong>准备好开始写作</strong>
-            <p>选择主文档，按 Ctrl+S 保存并编译。</p>
+            <p>选择编译对象，按 Ctrl+S 保存并编译。</p>
           </div>
-          <div id="pdfPreview" class="pdf-preview-scroll" title="Ctrl+单击定位源码；双击恢复铺满预览" role="document" tabindex="0" hidden>
+          <div id="pdfPreview" class="pdf-preview-scroll" title="左键选择文字；右键拖动平移；Alt+单击定位源码" role="document" tabindex="0" hidden>
             <div id="pdfPages" class="pdf-pages"></div>
             <div id="pdfRenderStatus" class="pdf-render-status" hidden></div>
           </div>
-          <div class="pdf-sync-hint" id="pdfSyncHint" aria-label="源码与 PDF 双向定位提示">
-            <kbd>Ctrl+单击</kbd>
-            <span>源码 ⇄ PDF</span>
+          <div class="pdf-preview-controls" id="pdfPreviewControls">
+            <div class="pdf-page-indicator" id="pdfPageIndicator" title="当前 PDF 页码" hidden>第 1 / 1 页</div>
+            <div class="pdf-sync-hint" id="pdfSyncHint" aria-label="源码与 PDF 双向定位提示">
+              <kbd>Alt+单击</kbd>
+              <span>源码 ⇄ PDF</span>
+            </div>
+            <button class="pdf-reset-zoom-button" id="pdfResetZoomButton" type="button" title="恢复为铺满宽度并保留当前位置" disabled>
+              <span aria-hidden="true">↺</span>
+              <span>恢复缩放</span>
+            </button>
+            <button class="pdf-download-button" id="pdfDownloadButton" type="button" title="下载当前预览的 PDF" disabled>
+              <span aria-hidden="true">↓</span>
+              <span>下载 PDF</span>
+            </button>
           </div>
         </div>
 
@@ -220,6 +244,151 @@
           <pre id="compileLog">尚无编译日志。</pre>
         </div>
       </section>
+
+      <div
+        class="panel-resizer"
+        id="codexResizer"
+        role="separator"
+        aria-label="调整预览区和 Codex 区宽度"
+        aria-controls="previewPane codexPanel"
+        aria-orientation="vertical"
+        tabindex="-1"
+        title="拖动调整宽度；双击恢复默认布局"
+        hidden
+      ></div>
+
+      <aside id="codexPanel" class="codex-panel" aria-labelledby="codexPanelTitle" hidden>
+        <div class="codex-toolbar">
+          <div class="codex-pane-heading">
+            <span class="codex-pane-mark" aria-hidden="true">✦</span>
+            <div>
+              <strong id="codexPanelTitle">Codex 助手</strong>
+              <div class="codex-local-status" id="codexLocalStatus">
+                <span class="codex-status-dot" aria-hidden="true"></span>
+                <span>本机 Codex 配置</span>
+              </div>
+            </div>
+          </div>
+          <div class="codex-toolbar-actions">
+            <button class="codex-new-thread" id="codexNewThreadButton" type="button" title="创建新的 Codex 对话">＋ 新对话</button>
+            <button class="codex-collapse-button" id="codexCollapseButton" type="button" aria-label="收起 Codex 助手" aria-controls="codexPanel" aria-expanded="true" title="收起 Codex 助手"><span class="codex-collapse-chevron" aria-hidden="true"></span></button>
+          </div>
+        </div>
+
+        <section class="codex-history" id="codexHistorySection" aria-labelledby="codexHistoryTitle">
+          <div class="codex-history-heading">
+            <button class="codex-history-toggle" id="codexHistoryToggleButton" type="button" aria-expanded="true" aria-controls="codexHistoryBody">
+              <span class="codex-history-heading-copy">
+                <strong id="codexHistoryTitle">Codex 历史</strong>
+                <small id="codexHistoryCurrent">全部工作区</small>
+              </span>
+              <span class="codex-history-heading-meta">
+                <span id="codexHistoryCount">0</span>
+                <span class="codex-history-chevron" aria-hidden="true"></span>
+              </span>
+            </button>
+          </div>
+          <div class="codex-history-body" id="codexHistoryBody">
+            <label class="codex-workspace-select">
+              <span>工作区</span>
+              <select id="codexWorkspaceFilter" aria-label="按工作区筛选 Codex 历史">
+                <option value="">全部工作区</option>
+              </select>
+            </label>
+            <div class="codex-history-controls">
+              <label class="codex-history-search" title="搜索 Codex 历史">
+                <span aria-hidden="true">⌕</span>
+                <input id="codexHistorySearch" type="search" maxlength="120" autocomplete="off" placeholder="搜索历史">
+              </label>
+              <button id="codexHistoryRefreshButton" type="button" aria-label="刷新 Codex 历史" title="刷新 Codex 历史">↻</button>
+            </div>
+            <form class="codex-rename-form" id="codexRenameForm" hidden>
+              <input id="codexRenameInput" type="text" maxlength="120" autocomplete="off" aria-label="新的对话名称">
+              <button type="submit">保存</button>
+              <button id="codexRenameCancelButton" type="button">取消</button>
+            </form>
+            <ul class="codex-history-list" id="codexHistoryList" aria-label="Codex 对话历史"></ul>
+            <button class="codex-history-more" id="codexHistoryMoreButton" type="button" hidden>加载更多</button>
+          </div>
+        </section>
+
+        <div class="codex-messages" id="codexMessages" aria-live="polite">
+          <div class="codex-empty" id="codexEmpty">
+            <div class="codex-empty-intro">
+              <div class="codex-mark" aria-hidden="true">✦</div>
+              <strong>询问 Codex</strong>
+            </div>
+            <div class="codex-quick-actions">
+              <button type="button" data-codex-action="compile">编译错误</button>
+              <button type="button" data-codex-action="selection">润色选区</button>
+              <button type="button" data-codex-action="review">检查文件</button>
+            </div>
+          </div>
+        </div>
+
+        <form class="codex-composer" id="codexComposer">
+          <div class="codex-context-row" aria-label="发送给 Codex 的上下文">
+            <label class="codex-context-chip">
+              <input id="codexCurrentFileContext" type="checkbox" checked>
+              <span id="codexCurrentFileLabel">当前文件</span>
+            </label>
+            <label class="codex-context-chip">
+              <input id="codexSelectionContext" type="checkbox" checked disabled>
+              <span id="codexSelectionLabel">选区</span>
+            </label>
+            <label class="codex-context-chip">
+              <input id="codexCompileLogContext" type="checkbox">
+              <span>编译日志</span>
+            </label>
+            <button class="codex-conversation-refresh" id="codexConversationRefreshButton" type="button" title="重新读取当前 Codex 对话" aria-label="刷新当前 Codex 对话">
+              <span aria-hidden="true">↻</span>
+              <span>刷新对话</span>
+            </button>
+          </div>
+          <label class="codex-prompt-wrap" for="codexPrompt">
+            <textarea id="codexPrompt" rows="3" maxlength="12000" placeholder="向 Codex 描述问题…（Enter 发送，Shift+Enter 换行）"></textarea>
+          </label>
+          <div class="codex-composer-footer">
+            <div class="codex-composer-state">
+              <label class="codex-model-picker" id="codexModelPicker" title="默认跟随本机 config.toml；覆盖选择后应用于下一次 Codex 任务">
+                <span class="codex-model-icon" aria-hidden="true">◇</span>
+                <select id="codexModelSelect" aria-label="Codex 模型">
+                  <option value="">跟随本机配置</option>
+                </select>
+              </label>
+              <label class="codex-reasoning-picker" id="codexReasoningPicker" data-effort="" title="设置 Codex 推理强度；自动模式跟随本机配置或模型默认值">
+                <span class="codex-reasoning-icon" aria-hidden="true">R</span>
+                <select id="codexReasoningSelect" aria-label="Codex 推理强度">
+                  <option value="">自动</option>
+                  <option value="minimal">Minimal</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="xhigh">XHigh</option>
+                </select>
+              </label>
+              <label class="codex-permission-picker" id="codexPermissionPicker" data-mode="read-only" title="设置后应用于所有新建和续聊的 Codex 任务">
+                <span class="codex-permission-dot" aria-hidden="true"></span>
+                <select id="codexPermissionSelect" aria-label="Codex 权限">
+                  <option value="read-only">只读</option>
+                  <option value="workspace-write">项目可写</option>
+                  <option value="full-access">Full access</option>
+                </select>
+              </label>
+              <span class="codex-run-status" id="codexRunStatus">就绪</span>
+            </div>
+            <div class="codex-composer-actions">
+              <button class="codex-stop-button" id="codexStopButton" type="button" hidden>停止</button>
+              <button class="codex-send-button" id="codexSendButton" type="submit"><span aria-hidden="true">✦</span> 发送</button>
+            </div>
+          </div>
+        </form>
+      </aside>
+
+      <button class="codex-edge-button" id="codexExpandButton" type="button" aria-controls="codexPanel" aria-expanded="false" title="展开 Codex 助手（Ctrl+Alt+C）" hidden>
+        <span aria-hidden="true">✦</span>
+        <span>Codex</span>
+      </button>
     </main>
   </div>
 
@@ -267,7 +436,9 @@
         <label for="shareUrl">安全分享链接</label>
         <div class="share-link-row">
           <input id="shareUrl" type="text" readonly>
-          <button class="button primary" id="copyShareButton" type="button">复制链接</button>
+          <button class="button primary" id="copyShareButton" type="button" data-state="idle">
+            <span id="copyShareLabel" aria-live="polite">复制链接</span>
+          </button>
         </div>
       </div>
 
@@ -302,6 +473,9 @@
   <script src="/vendor/ace/theme-textmate.js"></script>
   <script src="/vendor/ace/mode-latex.js"></script>
   <script src="/vendor/collaboration.js"></script>
+  <script src="/vendor/katex/katex.min.js"></script>
+  <script src="/vendor/katex/contrib/auto-render.min.js"></script>
+  <script src="/vendor/katex/contrib/copy-tex.min.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

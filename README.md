@@ -7,14 +7,50 @@ LocalTeX 是一个自包含、本地优先的 LaTeX 写作工作台。它既可�
 
 - Project file browser
 - Text editing for `.tex`, `.bib`, `.sty`, `.cls`, and other text files
-- Save with `Ctrl+S`
-- Compile with `Ctrl+Enter`
+- 使用 `Ctrl+S` 保存并编译
 - 无工具栏、全尺寸 PDF 预览
 - Compile log and extracted LaTeX diagnostics
 - Image and project-file upload
 - 局域网多人实时编辑、在线成员显示和自动保存
 - 带随机访问令牌的局域网鉴权
-- 无账号、无云服务，项目文件始终保存在主机磁盘
+- 复用主机本地配置、支持权限切换的 Codex 写作与编译助手
+- 项目文件始终保存在主机磁盘；只有主动调用 Codex 时，所选上下文才会交给 Codex
+
+## Codex 助手
+
+编辑页右侧提供独立的 Codex 抽屉，可分析编译日志、解释 LaTeX、润色选区或检查
+当前文件；抽屉关闭后不占用编辑器或 PDF 预览空间。LocalTeX 使用主机已有的
+`CODEX_HOME`、登录状态、模型和推理配置，不在
+网页、`data` 或论文目录中复制 API Key。修改本机 Codex 配置后，重新启动
+LocalTeX 服务即可生效。
+
+Codex 消息中的 `$...$`、`$$...$$`、`\(...\)`、`\[...\]` 及常用公式环境会由
+随项目安装的 KaTeX 在本地渲染；代码块不会被当成公式处理，复制渲染结果时仍会
+保留对应的 TeX 源码。
+
+当前版本采用以下权限边界：
+
+- 只有通过 `127.0.0.1` 访问的主机可以调用 Codex，局域网协作者看不到主机配置。
+- 主机可在编辑页底部选择“只读”“项目可写”或“Full access”，设置保存在本机
+  `data/codex-settings.json`，适用于之后的新建和续聊任务。
+- 模型入口默认跟随主机 `config.toml`；也可以从当前登录账号的 Codex 可用模型列表中
+  覆盖选择。模型选择同样只保存在本机 `data/codex-settings.json`，下一次任务生效。
+- “只读”不会修改文件；“项目可写”允许修改线程工作区；“Full access”允许访问
+  工作区外的文件、执行系统命令，并开启命令网络访问和实时网页搜索。
+- 所有模式均采用非交互运行；开启 Full access 后应在提示词中明确操作范围，并谨慎
+  处理删除、覆盖和其他难以恢复的操作。
+- 当前文件、选区和编译日志分别由用户勾选并作为直接上下文；为了解决跨文件的
+  LaTeX 问题，Codex 会在所选历史原本的工作区继续运行。
+- “停止”按钮会中断当前任务，同一个项目同时只运行一个 Codex 任务。
+
+首次使用前应确保本机 Codex 已经登录：
+
+```powershell
+codex login status
+```
+
+本地登录既可以使用 ChatGPT，也可以使用 API Key；具体计费和数据策略由现有
+Codex 登录方式及所属 OpenAI 工作区决定。
 
 ## Self-contained runtime
 
