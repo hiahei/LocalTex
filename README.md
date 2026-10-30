@@ -3,6 +3,8 @@
 LocalTeX 是一个自包含、本地优先的 LaTeX 写作工作台。它既可以只在本机使用，
 也可以在可信局域网中通过安全分享链接进行多人实时协作。
 
+本项目由 hiahei 设计与维护，使用 OpenAI Codex 辅助开发。
+
 ## 当前功能
 
 - Project file browser
