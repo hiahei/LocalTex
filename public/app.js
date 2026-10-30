@@ -138,6 +138,11 @@ const elements = {
   pdfPreview: document.querySelector('#pdfPreview'),
   pdfRenderStatus: document.querySelector('#pdfRenderStatus'),
   pdfDownloadButton: document.querySelector('#pdfDownloadButton'),
+  pdfAnnotateButton: document.querySelector('#pdfAnnotateButton'),
+  pdfAnnotationCount: document.querySelector('#pdfAnnotationCount'),
+  pdfAnnotationList: document.querySelector('#pdfAnnotationList'),
+  pdfAnnotationPanel: document.querySelector('#pdfAnnotationPanel'),
+  pdfSendAnnotationsButton: document.querySelector('#pdfSendAnnotationsButton'),
   pdfPageIndicator: document.querySelector('#pdfPageIndicator'),
   pdfResetZoomButton: document.querySelector('#pdfResetZoomButton'),
   pdfSyncHint: document.querySelector('#pdfSyncHint'),
@@ -225,6 +230,12 @@ const pdfPanState = {
   pointerId: null,
   lastX: 0,
   lastY: 0,
+};
+const pdfAnnotationState = {
+  active: false,
+  drag: null,
+  items: [],
+  sending: false,
 };
 const synctexState = {
   editorMarker: null,
@@ -3375,6 +3386,7 @@ function clearPdfTextLayers() {
 
 function clearPdfPreview() {
   stopPdfPan();
+  clearPdfAnnotations();
   pdfPreviewState.renderGeneration += 1;
   pdfPreviewState.renderSequence += 1;
   clearTimeout(pdfPreviewState.renderTimer);
@@ -3468,6 +3480,7 @@ async function renderPdfPages(generation = pdfPreviewState.renderGeneration) {
 
   if (generation !== pdfPreviewState.renderGeneration || renderSequence !== pdfPreviewState.renderSequence) return;
   elements.pdfPages.replaceChildren(pages);
+  renderPdfAnnotations();
   setPdfRenderStatus();
   schedulePdfPageIndicatorUpdate();
 }
@@ -3499,6 +3512,7 @@ function updatePdfPreviewContext() {
   schedulePdfPageIndicatorUpdate();
   elements.pdfDownloadButton.disabled = !pdfPreviewState.document || !pdfPreviewState.source;
   elements.pdfResetZoomButton.disabled = !pdfPreviewState.document;
+  elements.pdfAnnotateButton.disabled = !pdfPreviewState.document;
   elements.pdfPreview.title = sourceMapped
     ? '左键选择文字；右键拖动平移；Alt+单击定位源码'
     : '左键选择文字；右键拖动平移';
@@ -3554,6 +3568,7 @@ async function downloadPdfPreview() {
 
 async function loadPdfPreview(source, mainFile = state.mainDocument, previewPath = '', viewState = null) {
   stopPdfPan();
+  clearPdfAnnotations();
   const generation = pdfPreviewState.renderGeneration + 1;
   pdfPreviewState.renderGeneration = generation;
   clearPdfTextLayers();
@@ -3674,6 +3689,212 @@ function stopPdfPan(event) {
   elements.pdfPreview.classList.remove('is-panning');
   if (pointerId !== null && elements.pdfPreview.hasPointerCapture?.(pointerId)) {
     elements.pdfPreview.releasePointerCapture(pointerId);
+  }
+}
+
+function annotationId() {
+  return globalThis.crypto?.randomUUID?.() || `pdf-annotation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function setPdfAnnotationMode(active) {
+  pdfAnnotationState.active = Boolean(active && pdfPreviewState.document);
+  elements.pdfAnnotateButton.classList.toggle('active', pdfAnnotationState.active);
+  elements.pdfAnnotateButton.setAttribute('aria-pressed', String(pdfAnnotationState.active));
+  elements.pdfPreview.classList.toggle('is-annotating', pdfAnnotationState.active);
+  elements.pdfAnnotateButton.title = pdfAnnotationState.active
+    ? '正在标注：在 PDF 页面上拖出区域；再次点击结束'
+    : '在 PDF 上拖出需要修改的区域';
+}
+
+function renderPdfAnnotations() {
+  elements.pdfPages.querySelectorAll('.pdf-annotation-mark, .pdf-annotation-draft').forEach((node) => node.remove());
+  for (const item of pdfAnnotationState.items) {
+    const shell = elements.pdfPages.querySelector(`.pdf-page-shell[data-page="${item.page}"]`);
+    if (!shell) continue;
+    const pdfWidth = Number(shell.dataset.pdfWidth) || 1;
+    const pdfHeight = Number(shell.dataset.pdfHeight) || 1;
+    const mark = document.createElement('div');
+    mark.className = 'pdf-annotation-mark';
+    mark.dataset.annotationId = item.id;
+    mark.style.left = `${(item.x / pdfWidth) * 100}%`;
+    mark.style.top = `${(item.y / pdfHeight) * 100}%`;
+    mark.style.width = `${(item.width / pdfWidth) * 100}%`;
+    mark.style.height = `${(item.height / pdfHeight) * 100}%`;
+    mark.title = item.note || `第 ${item.page} 页标注`;
+    shell.append(mark);
+  }
+}
+
+function renderPdfAnnotationList() {
+  const hasItems = pdfAnnotationState.items.length > 0;
+  elements.pdfAnnotationPanel.hidden = !hasItems;
+  elements.pdfAnnotationCount.textContent = String(pdfAnnotationState.items.length);
+  elements.pdfSendAnnotationsButton.disabled = !hasItems || pdfAnnotationState.sending;
+  elements.pdfAnnotationList.replaceChildren();
+  for (const item of pdfAnnotationState.items) {
+    const card = document.createElement('div');
+    card.className = 'pdf-annotation-item';
+    const heading = document.createElement('div');
+    heading.className = 'pdf-annotation-item-heading';
+    const label = document.createElement('span');
+    label.textContent = `第 ${item.page} 页 · 区域标注`;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'pdf-annotation-remove';
+    remove.textContent = '删除';
+    remove.addEventListener('click', () => {
+      pdfAnnotationState.items = pdfAnnotationState.items.filter((candidate) => candidate.id !== item.id);
+      renderPdfAnnotationList();
+      renderPdfAnnotations();
+    });
+    heading.append(label, remove);
+    const note = document.createElement('textarea');
+    note.rows = 2;
+    note.maxLength = 800;
+    note.placeholder = '希望 Codex 修改什么？';
+    note.value = item.note || '';
+    note.addEventListener('input', () => {
+      item.note = note.value;
+      const mark = elements.pdfPages.querySelector(`[data-annotation-id="${item.id}"]`);
+      if (mark) mark.title = item.note || `第 ${item.page} 页标注`;
+    });
+    note.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+      event.preventDefault();
+      sendPdfAnnotationsToCodex().catch((error) => showToast(error.message, true));
+    });
+    card.append(heading, note);
+    elements.pdfAnnotationList.append(card);
+  }
+}
+
+function clearPdfAnnotations() {
+  pdfAnnotationState.items = [];
+  cancelPdfAnnotationDrag();
+  setPdfAnnotationMode(false);
+  renderPdfAnnotationList();
+  renderPdfAnnotations();
+}
+
+function cancelPdfAnnotationDrag() {
+  const drag = pdfAnnotationState.drag;
+  if (!drag) return;
+  drag.draft.remove();
+  if (drag.shell.hasPointerCapture?.(drag.pointerId)) {
+    drag.shell.releasePointerCapture(drag.pointerId);
+  }
+  pdfAnnotationState.drag = null;
+}
+
+function pdfAnnotationPoint(event, shell) {
+  const rect = shell.getBoundingClientRect();
+  const pdfWidth = Number(shell.dataset.pdfWidth) || rect.width;
+  const pdfHeight = Number(shell.dataset.pdfHeight) || rect.height;
+  const x = clamp(event.clientX - rect.left, 0, rect.width);
+  const y = clamp(event.clientY - rect.top, 0, rect.height);
+  return {
+    x: x * (pdfWidth / Math.max(1, rect.width)),
+    y: y * (pdfHeight / Math.max(1, rect.height)),
+  };
+}
+
+function updatePdfAnnotationDraft(event) {
+  const drag = pdfAnnotationState.drag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  const rect = drag.shell.getBoundingClientRect();
+  const left = clamp(Math.min(drag.startClientX, event.clientX) - rect.left, 0, rect.width);
+  const top = clamp(Math.min(drag.startClientY, event.clientY) - rect.top, 0, rect.height);
+  const right = clamp(Math.max(drag.startClientX, event.clientX) - rect.left, 0, rect.width);
+  const bottom = clamp(Math.max(drag.startClientY, event.clientY) - rect.top, 0, rect.height);
+  drag.draft.style.left = `${(left / rect.width) * 100}%`;
+  drag.draft.style.top = `${(top / rect.height) * 100}%`;
+  drag.draft.style.width = `${((right - left) / rect.width) * 100}%`;
+  drag.draft.style.height = `${((bottom - top) / rect.height) * 100}%`;
+}
+
+function startPdfAnnotation(event) {
+  if (!pdfAnnotationState.active || event.button !== 0) return;
+  const shell = event.target.closest?.('.pdf-page-shell');
+  if (!shell) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const draft = document.createElement('div');
+  draft.className = 'pdf-annotation-draft';
+  shell.append(draft);
+  pdfAnnotationState.drag = {
+    shell,
+    draft,
+    pointerId: event.pointerId,
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+  };
+  shell.setPointerCapture?.(event.pointerId);
+}
+
+function finishPdfAnnotation(event) {
+  const drag = pdfAnnotationState.drag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  updatePdfAnnotationDraft(event);
+  const start = pdfAnnotationPoint({ clientX: drag.startClientX, clientY: drag.startClientY }, drag.shell);
+  const end = pdfAnnotationPoint(event, drag.shell);
+  drag.draft.remove();
+  pdfAnnotationState.drag = null;
+  if (drag.shell.hasPointerCapture?.(event.pointerId)) drag.shell.releasePointerCapture(event.pointerId);
+  const x = Math.min(start.x, end.x);
+  const y = Math.min(start.y, end.y);
+  const width = Math.abs(end.x - start.x);
+  const height = Math.abs(end.y - start.y);
+  if (width < 8 || height < 8) return;
+  pdfAnnotationState.items.push({
+    id: annotationId(),
+    page: Number(drag.shell.dataset.page) || 1,
+    x,
+    y,
+    width,
+    height,
+    note: '',
+  });
+  renderPdfAnnotationList();
+  renderPdfAnnotations();
+  elements.pdfAnnotationList.lastElementChild?.querySelector('textarea')?.focus();
+}
+
+async function sendPdfAnnotationsToCodex() {
+  if (!pdfAnnotationState.items.length || pdfAnnotationState.sending) return false;
+  pdfAnnotationState.sending = true;
+  renderPdfAnnotationList();
+  try {
+    const annotations = pdfAnnotationState.items.map((item) => ({ ...item }));
+    const sourcePositions = hasSourceMappedPdf()
+      ? await Promise.all(annotations.map(async (item) => {
+        try {
+          return await api('/api/synctex/edit', {
+            method: 'POST',
+            body: JSON.stringify({ mainFile: state.mainDocument, page: item.page, x: item.x, y: item.y }),
+          });
+        } catch {
+          return null;
+        }
+      }))
+      : [];
+    const lines = annotations.map((item, index) => {
+      const source = sourcePositions[index];
+      const location = source ? `源码 ${source.sourceFile}:${source.line}` : '尚未映射到源码';
+      const note = item.note.trim() || '请检查并判断是否需要修改。';
+      return `- 第 ${item.page} 页，${location}；标注区域 x=${item.x.toFixed(1)}, y=${item.y.toFixed(1)}, w=${item.width.toFixed(1)}, h=${item.height.toFixed(1)}；要求：${note}`;
+    });
+    const prompt = [
+      '请根据下面的 PDF 标注检查并修改论文源码。优先使用标注映射到的源码文件和行号，先理解上下文，再完成必要修改。',
+      ...lines,
+      '完成后请用“修改总结”开头，简洁说明修改了哪些文件、哪些内容以及验证结果。',
+    ].join('\n');
+    elements.codexCurrentFileContext.checked = true;
+    const sent = await sendCodexPrompt(prompt);
+    if (sent) clearPdfAnnotations();
+    return sent;
+  } finally {
+    pdfAnnotationState.sending = false;
+    renderPdfAnnotationList();
   }
 }
 
@@ -4099,7 +4320,15 @@ for (const button of elements.codexPanel.querySelectorAll('[data-codex-action]')
 elements.pdfPreview.addEventListener('click', jumpPdfToSource);
 elements.pdfDownloadButton.addEventListener('click', downloadPdfPreview);
 elements.pdfResetZoomButton.addEventListener('click', resetPdfPreview);
+elements.pdfAnnotateButton.addEventListener('click', () => setPdfAnnotationMode(!pdfAnnotationState.active));
+elements.pdfSendAnnotationsButton.addEventListener('click', () => {
+  sendPdfAnnotationsToCodex().catch((error) => showToast(error.message, true));
+});
 elements.pdfPreview.addEventListener('wheel', zoomPdfPreview, { passive: false });
+elements.pdfPreview.addEventListener('pointerdown', startPdfAnnotation);
+elements.pdfPreview.addEventListener('pointermove', updatePdfAnnotationDraft);
+elements.pdfPreview.addEventListener('pointerup', finishPdfAnnotation);
+elements.pdfPreview.addEventListener('pointercancel', finishPdfAnnotation);
 elements.pdfPreview.addEventListener('pointerdown', startPdfPan);
 elements.pdfPreview.addEventListener('pointermove', movePdfPan);
 elements.pdfPreview.addEventListener('pointerup', stopPdfPan);
@@ -4177,6 +4406,13 @@ elements.collaborationButton.addEventListener('click', () => {
 });
 
 window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && pdfAnnotationState.active) {
+    event.preventDefault();
+    event.stopPropagation();
+    cancelPdfAnnotationDrag();
+    setPdfAnnotationMode(false);
+    return;
+  }
   if (
     (event.ctrlKey || event.metaKey)
     && event.key.toLowerCase() === 'f'

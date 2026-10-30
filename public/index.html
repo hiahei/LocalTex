@@ -232,11 +232,24 @@
               <span aria-hidden="true">↺</span>
               <span>恢复缩放</span>
             </button>
+            <button class="pdf-annotate-button" id="pdfAnnotateButton" type="button" title="在 PDF 上拖出需要修改的区域" disabled>
+              <span aria-hidden="true">▧</span>
+              <span>标注 PDF</span>
+            </button>
             <button class="pdf-download-button" id="pdfDownloadButton" type="button" title="下载当前预览的 PDF" disabled>
               <span aria-hidden="true">↓</span>
               <span>下载 PDF</span>
             </button>
           </div>
+          <section class="pdf-annotation-panel" id="pdfAnnotationPanel" hidden aria-label="PDF 标注">
+            <div class="pdf-annotation-heading">
+              <strong>给 Codex 的标注</strong>
+              <span id="pdfAnnotationCount">0</span>
+            </div>
+            <p class="pdf-annotation-help">在 PDF 上拖出区域，再写下希望 Codex 修改的内容。</p>
+            <div class="pdf-annotation-list" id="pdfAnnotationList"></div>
+            <button class="pdf-send-annotations-button" id="pdfSendAnnotationsButton" type="button">交给 Codex</button>
+          </section>
         </div>
 
         <div id="logPanel" class="log-panel" role="tabpanel" hidden>

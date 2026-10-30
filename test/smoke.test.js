@@ -182,6 +182,9 @@ test('serves the editor and local configuration', async () => {
   assert.match(page, /id="pdfPageIndicator"/);
   assert.match(page, /id="pdfResetZoomButton"/);
   assert.match(page, /id="pdfDownloadButton"/);
+  assert.match(page, /id="pdfAnnotateButton"/);
+  assert.match(page, /id="pdfAnnotationPanel"/);
+  assert.match(page, /id="pdfSendAnnotationsButton"/);
   assert.match(page, />恢复缩放</);
   assert.match(page, /源码 → PDF/);
   assert.equal((page.match(/<kbd>Alt\+单击<\/kbd>/g) || []).length, 1);
@@ -242,6 +245,15 @@ test('serves the editor and local configuration', async () => {
   assert.match(appScript, /async function previewPdfFile\(file\)/);
   assert.match(appScript, /loadPdfPreview\(pdfUrl, '', file\.path\)/);
   assert.match(appScript, /async function sendCodexPrompt\(/);
+  assert.match(appScript, /function setPdfAnnotationMode\(/);
+  assert.match(appScript, /event\.key === 'Escape' && pdfAnnotationState\.active/);
+  assert.match(appScript, /cancelPdfAnnotationDrag\(\);/);
+  assert.match(appScript, /function renderPdfAnnotations\(/);
+  assert.match(appScript, /pdfWidth \/ Math\.max\(1, rect\.width\)/);
+  assert.match(appScript, /item\.x \/ pdfWidth/);
+  assert.match(appScript, /async function sendPdfAnnotationsToCodex\(/);
+  assert.match(appScript, /event\.key !== 'Enter' \|\| event\.shiftKey/);
+  assert.match(appScript, /api\('\/api\/synctex\/edit'/);
   assert.match(appScript, /new EventSource\(eventUrl\)/);
   assert.match(appScript, /function receiveCodexEvent\(/);
   assert.match(appScript, /function scheduleCodexEventPoll\(/);
@@ -467,6 +479,8 @@ test('serves the editor and local configuration', async () => {
   assert.match(styles, /#pdfPreview\.sync-source-ready \.pdf-text-layer \*/);
   assert.match(styles, /cursor: crosshair !important/);
   assert.match(styles, /\.pdf-render-status/);
+  assert.match(styles, /\.pdf-annotation-panel/);
+  assert.match(styles, /\.pdf-annotation-mark/);
   assert.match(styles, /--codex-width:/);
   assert.match(styles, /\.workspace-layout\.codex-collapsed/);
   assert.match(styles, /\.codex-panel\s*\{[\s\S]{0,180}display: flex/);
