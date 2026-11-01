@@ -163,6 +163,7 @@ test('serves the editor and local configuration', async () => {
   assert.match(page, /保存并编译 <kbd>Ctrl S<\/kbd>/);
   assert.doesNotMatch(page, /id="saveButton"/);
   assert.match(page, /id="previewResizer"/);
+  assert.match(page, /向右拖动扩大 PDF 预览区/);
   assert.match(page, /id="pdfPreview" class="pdf-preview-scroll"/);
   assert.match(page, /右键拖动平移/);
   assert.doesNotMatch(page, /<iframe id="pdfPreview"/);

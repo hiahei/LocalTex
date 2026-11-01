@@ -847,7 +847,7 @@ function resizedPanelSizes(kind, startSizes, deltaX) {
   return {
     sidebar: startSizes.sidebar,
     preview: clamp(
-      startSizes.preview - deltaX,
+      startSizes.preview + deltaX,
       minimums.preview,
       minimums.available - occupiedSidebar - occupiedCodex - minimums.editor,
     ),
